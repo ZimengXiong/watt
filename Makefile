@@ -30,6 +30,8 @@ release: setup
 		echo "Error: Working directory has uncommitted changes. Commit or stash them first."; \
 		exit 1; \
 	fi
+	@echo "Pushing to origin..."
+	@git push origin
 	@mkdir -p $(BUILD_DIR)
 	@xcodebuild -project $(PROJECT_NAME).xcodeproj \
 		-scheme $(SCHEME) \
