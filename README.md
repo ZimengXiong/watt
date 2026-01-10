@@ -1,7 +1,3 @@
-<p align="left">
-  <img src="Screenshots/icon.png" alt="Watt" width="64" height="64">
-</p>
-
 # watt
 
 menu bar app that displays real-time power consumption in watts. monitor power draw, battery health, and energy costs.
@@ -18,7 +14,7 @@ menu bar app that displays real-time power consumption in watts. monitor power d
 
 ## Installation
 
-### Homebrew
+### [Homebrew](https://brew.sh)
 
 ```bash
 brew install --cask --no-quarantine zimengxiong/watt/watt
@@ -40,10 +36,6 @@ make install
 ```
 
 See `make help` for all available targets.
-
-### Pre-built Binary
-
-Download the latest release from the [Releases](https://github.com/zimengxiong/watt/releases) page.
 
 # Extra
 
