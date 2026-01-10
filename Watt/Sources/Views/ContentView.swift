@@ -1,4 +1,5 @@
 import SwiftUI
+import ServiceManagement
 
 struct ContentView: View {
     @ObservedObject var powerMonitor: PowerMonitorService
@@ -650,6 +651,7 @@ struct SettingsView: View {
     @State private var zipCodeInput: String = ""
     @State private var showResetConfirmation: Bool = false
     @State private var showUninstallConfirmation: Bool = false
+    @State private var launchAtLogin: Bool = SMAppService.mainApp.status == .enabled
 
     var body: some View {
         ZStack {
@@ -733,7 +735,28 @@ struct SettingsView: View {
                     .controlSize(.small)
                 }
 
-                SettingsSection(title: "Data") {
+                SettingsSection(title: "Extras") {
+                    Toggle(isOn: $launchAtLogin) {
+                        Text("Launch at login")
+                    }
+                    .toggleStyle(.checkbox)
+                    .controlSize(.small)
+                    .onChange(of: launchAtLogin) { newValue in
+                        do {
+                            if newValue {
+                                try SMAppService.mainApp.register()
+                            } else {
+                                try SMAppService.mainApp.unregister()
+                            }
+                        } catch {
+                            launchAtLogin = !newValue
+                        }
+                    }
+
+                    Divider()
+                        .opacity(0.3)
+                        .padding(.vertical, 4)
+
                     if showResetConfirmation {
                         HStack(spacing: 8) {
                             Text("Reset all statistics?")
@@ -760,10 +783,12 @@ struct SettingsView: View {
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                     }
-                }
 
-                if daemon.isInstalled {
-                    SettingsSection(title: "Service") {
+                    if daemon.isInstalled {
+                        Divider()
+                            .opacity(0.3)
+                            .padding(.vertical, 4)
+
                         if showUninstallConfirmation {
                             HStack(spacing: 8) {
                                 Text("Remove service?")
