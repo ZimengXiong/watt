@@ -648,8 +648,11 @@ struct SettingsView: View {
     @State private var showResetConfirmation: Bool = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("Settings")
+        ZStack {
+            VisualEffectView(material: .popover, blendingMode: .behindWindow)
+
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Settings")
                 .font(.system(size: 13, weight: .semibold))
                 .padding(.horizontal, 16)
                 .padding(.top, 14)
@@ -660,7 +663,7 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 16) {
                 SettingsSection(title: "Electricity Cost") {
                     HStack(spacing: 8) {
-                        HStack(spacing: 2) {
+                        HStack(spacing: 4) {
                             Text("$")
                                 .foregroundStyle(.secondary)
                             TextField("0.120", text: $costInput)
@@ -668,7 +671,8 @@ struct SettingsView: View {
                                 .frame(width: 50)
                                 .onSubmit { applyCost() }
                         }
-                        .padding(.horizontal, 8)
+                        .padding(.leading, 10)
+                        .padding(.trailing, 8)
                         .padding(.vertical, 5)
                         .background(Color(nsColor: .textBackgroundColor))
                         .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
@@ -755,6 +759,7 @@ struct SettingsView: View {
                 }
             }
             .padding(16)
+        }
         }
         .frame(width: 280)
         .onAppear {

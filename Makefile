@@ -34,6 +34,19 @@ release: setup
 		-quiet \
 		build
 	@echo "Release build completed: $(RELEASE_APP_PATH)"
+	@echo "Packaging for distribution..."
+	@mkdir -p $(BUILD_DIR)/release
+	@cd $(DERIVED_DATA)/Build/Products/Release && zip -rq $(PROJECT_NAME).app.zip $(PROJECT_NAME).app
+	@mv $(DERIVED_DATA)/Build/Products/Release/$(PROJECT_NAME).app.zip $(BUILD_DIR)/release/
+	@echo "Package: $(BUILD_DIR)/release/$(PROJECT_NAME).app.zip"
+	@SHA=$$(shasum -a 256 $(BUILD_DIR)/release/$(PROJECT_NAME).app.zip | cut -d' ' -f1) && \
+		sed -i '' "s/sha256 \".*\"/sha256 \"$$SHA\"/" homebrew/watt.rb && \
+		echo "Updated homebrew/watt.rb with SHA256: $$SHA" && \
+		cd homebrew && \
+		git add watt.rb && \
+		git commit -m "Update cask SHA256 to $$SHA" && \
+		git push && \
+		echo "Pushed homebrew update to remote"
 
 run: build
 	@$(EXECUTABLE)
@@ -81,7 +94,7 @@ help:
 	@echo "Targets:"
 	@echo "  setup         Generate Xcode project with XcodeGen"
 	@echo "  build         Build the app (debug configuration)"
-	@echo "  release       Build the app (release configuration)"
+	@echo "  release       Build release, package zip, update homebrew"
 	@echo "  run           Build and run the executable directly"
 	@echo "  open          Build and open the app bundle"
 	@echo "  run-release   Build and run release version"
@@ -92,6 +105,6 @@ help:
 	@echo "  help          Show this help message"
 	@echo ""
 	@echo "Examples:"
-	@echo "  make build    # Build the app"
-	@echo "  make run      # Build and run"
-	@echo "  make clean    # Clean everything"
+	@echo "  make build    # Build debug"
+	@echo "  make release  # Build release + update homebrew"
+	@echo "  make install  # Install to /Applications"
