@@ -42,3 +42,7 @@ See `make help` for all available targets.
 <p align="left">
   <img src="Screenshots/extra.png" alt="Watt" height="600">
 </p>
+
+## Acknowledgments
+
+CPU, GPU, and ANE usage monitoring is based on [asitop](https://github.com/tlkh/asitop) by Timothy Liu. The approach uses Apple's `powermetrics` tool to read accurate idle ratios and energy consumption data from Apple Silicon.
