@@ -1,9 +1,9 @@
 # watt
 
-menu bar app that displays real-time power consumption in watts. monitor power draw, battery health, and energy costs.
+menu bar app that displays real-time power consumption in watts. monitor power draw, CPU usage, battery health, and energy costs.
 
 <p align="left">
-  <img src="Screenshots/mainpage.png" alt="Watt" height="400">
+  <img src="Screenshots/main.png" alt="Watt" height="400">
 </p>
 
 `watt` reads power data from multiple macOS system sources:

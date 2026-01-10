@@ -16,6 +16,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem?
     var popover: NSPopover?
     var powerMonitor: PowerMonitorService?
+    var systemMetrics: SystemMetricsService?
     private var cancellables = Set<AnyCancellable>()
     private var statusBarTimer: DispatchSourceTimer?
     private var globalEventMonitor: Any?
@@ -23,6 +24,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         powerMonitor = PowerMonitorService()
+        systemMetrics = SystemMetricsService()
 
         setupMenuBar()
         setupPopover()
@@ -61,8 +63,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         popover?.behavior = .transient
         popover?.animates = true
 
-        let hostingController = NSHostingController(rootView: ContentView(powerMonitor: powerMonitor!))
-        hostingController.view.frame = NSRect(x: 0, y: 0, width: 320, height: 380)
+        let hostingController = NSHostingController(rootView: ContentView(powerMonitor: powerMonitor!, systemMetrics: systemMetrics!))
+        hostingController.view.frame = NSRect(x: 0, y: 0, width: 320, height: 520)
         popover?.contentViewController = hostingController
     }
 

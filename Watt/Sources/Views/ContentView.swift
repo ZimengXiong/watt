@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var powerMonitor: PowerMonitorService
+    @ObservedObject var systemMetrics: SystemMetricsService
     @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
@@ -14,6 +15,7 @@ struct ContentView: View {
 
                 ScrollView(.vertical, showsIndicators: false) {
                     VStack(spacing: 10) {
+                        SystemMetricsSection(metricsService: systemMetrics)
                         PowerFlowSection(powerMonitor: powerMonitor)
                         BatterySection(powerMonitor: powerMonitor)
                         HistorySection(powerMonitor: powerMonitor)
@@ -796,5 +798,5 @@ struct SettingsSection<Content: View>: View {
 // MARK: - Preview
 
 #Preview {
-    ContentView(powerMonitor: PowerMonitorService())
+    ContentView(powerMonitor: PowerMonitorService(), systemMetrics: SystemMetricsService())
 }
