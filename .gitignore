@@ -1,0 +1,29 @@
+# Build artifacts
+build/
+DerivedData/
+*.xcuserstate
+
+# Xcode
+*.xcworkspace/xcuserdata/
+xcuserdata/
+*.xcodeproj/
+
+# Generated files
+*.app
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
