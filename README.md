@@ -14,6 +14,8 @@ Monitor power consumption, cost, and core usage.
 brew install --cask --no-quarantine zimengxiong/watt/watt
 ```
 
+> **Note:** The `--no-quarantine` flag is required because the app is not notarized with Apple. Without this flag, macOS Gatekeeper will block the app from running.
+
 ### Build from Source
 
 Requires [XcodeGen](https://github.com/yonaskolb/XcodeGen) and Xcode Command Line Tools.
