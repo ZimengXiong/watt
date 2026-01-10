@@ -1,6 +1,6 @@
-# Watt
+# watt
 
-A lightweight macOS menu bar app for real-time power monitoring on Apple Silicon Macs.
+Monitor power consumption, cost, and core usage.
 
 <p align="left">
   <img src="Screenshots/main.png" alt="Watt" height="700">
