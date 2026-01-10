@@ -39,7 +39,7 @@ On first launch, Watt prompts to install a system service that runs Apple's `pow
 
 ## Settings
 
-<p align="center">
+<p align="left">
   <img src="Screenshots/extra.png" alt="Settings" height="600">
 </p>
 
