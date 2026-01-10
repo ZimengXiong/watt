@@ -10,7 +10,7 @@ menu bar app that displays real-time power consumption in watts. monitor power d
   <img src="screenshots/screenshot.png" alt="Watt" height="400">
 </p>
 
-watt reads power data from multiple macOS system sources:
+`watt` reads power data from multiple macOS system sources:
 
 - **SMC (System Management Controller)**: Real-time power readings via SMC keys (`PSTR`, `PDTR`, `SBAP`)
 - **IOKit**: Battery properties from `AppleSmartBattery` including voltage, amperage, capacity, and health
@@ -48,4 +48,6 @@ Download the latest release from the [Releases](https://github.com/zimengxiong/w
 
 # Extra
 
-![](screenshots/extra.png)
+<p align="left">
+  <img src="screenshots/extra.png" alt="Watt" height="600">
+</p>
