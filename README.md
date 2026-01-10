@@ -6,11 +6,6 @@ Monitor power consumption, cost, and core usage.
   <img src="Screenshots/main.png" alt="Watt" height="700">
 </p>
 
-## Requirements
-
-- macOS 13.0 (Ventura) or later
-- Apple Silicon Mac (M1/M2/M3/M4)
-
 ## Installation
 
 ### Homebrew
