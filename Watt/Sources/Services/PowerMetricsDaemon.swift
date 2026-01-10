@@ -1,9 +1,5 @@
 import Foundation
 
-// MARK: - PowerMetrics Daemon Manager
-// Manages a LaunchDaemon that runs powermetrics with root privileges
-// User authorizes ONCE during installation, then it works forever
-
 class PowerMetricsDaemon: ObservableObject {
     static let shared = PowerMetricsDaemon()
 
@@ -15,13 +11,10 @@ class PowerMetricsDaemon: ObservableObject {
     @Published var isRunning: Bool = false
     @Published var lastError: String?
 
-    // Parsed metrics (from powermetrics idle_ratio)
     @Published var eCPUUsage: Double = 0
     @Published var pCPUUsage: Double = 0
     @Published var gpuUsage: Double = 0
     @Published var aneUsage: Double = 0
-
-    // Power in Watts (from energy / interval)
     @Published var anePower: Double = 0
     @Published var cpuPower: Double = 0
     @Published var gpuPower: Double = 0
@@ -38,12 +31,8 @@ class PowerMetricsDaemon: ObservableObject {
         stopReading()
     }
 
-    // MARK: - Installation Check
-
     func checkInstallation() {
         let daemonExists = FileManager.default.fileExists(atPath: daemonPlistPath)
-
-        // Set synchronously so callers can check immediately
         isInstalled = daemonExists
 
         if daemonExists {
@@ -51,14 +40,10 @@ class PowerMetricsDaemon: ObservableObject {
         }
     }
 
-    // MARK: - Installation with Custom Dialog
-
     func install() {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
 
-            // No wrapper script - run powermetrics directly from launchd
-            // This matches how asitop runs it
             let daemonPlist = """
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -86,7 +71,6 @@ class PowerMetricsDaemon: ObservableObject {
 </plist>
 """
 
-            // Write temp plist
             let tempPlist = "/tmp/watt-install-plist.plist"
 
             do {
@@ -98,7 +82,6 @@ class PowerMetricsDaemon: ObservableObject {
                 return
             }
 
-            // Install command - run powermetrics directly via launchd (no wrapper script)
             let installCmd = """
 cp '\(tempPlist)' '\(self.daemonPlistPath)' && \
 chmod 644 '\(self.daemonPlistPath)' && \
@@ -108,7 +91,6 @@ launchctl bootstrap system '\(self.daemonPlistPath)' && \
 rm -f '\(tempPlist)'
 """
 
-            // Use AppleScript with custom prompt - detailed explanation for user
             let promptText = """
 Watt needs administrator privileges to install a system service for accurate hardware monitoring.
 
@@ -162,8 +144,6 @@ do shell script "\(installCmd.replacingOccurrences(of: "\\", with: "\\\\").repla
         }
     }
 
-    // MARK: - Uninstall
-
     func uninstall() {
         let uninstallCmd = """
 launchctl bootout system '\(daemonPlistPath)' 2>/dev/null; \
@@ -204,15 +184,9 @@ do shell script "\(uninstallCmd)" with administrator privileges with prompt "\(u
         }
     }
 
-    // MARK: - Reading Metrics
-
     func startReading() {
         stopReading()
-
-        // Read immediately
         readMetricsFile()
-
-        // Read at same rate as powermetrics samples
         readTimer = Timer.scheduledTimer(withTimeInterval: sampleIntervalMs / 1000.0, repeats: true) { [weak self] _ in
             self?.readMetricsFile()
         }
@@ -229,22 +203,17 @@ do shell script "\(uninstallCmd)" with administrator privileges with prompt "\(u
             return
         }
 
-        // powermetrics outputs NUL-separated plists, we need the last one
-        // Split by NUL byte and take the last complete plist
         let chunks = data.split(separator: 0)
         guard let lastChunk = chunks.last, lastChunk.count > 100 else {
             return
         }
 
-        // Parse the last plist
         guard let plist = try? PropertyListSerialization.propertyList(from: Data(lastChunk), options: [], format: nil) as? [String: Any] else {
             return
         }
 
         parseMetrics(plist)
     }
-
-    // MARK: - Parse Metrics (following asitop's approach)
 
     private func parseMetrics(_ plist: [String: Any]) {
         var eCPU: Double = 0
@@ -255,11 +224,7 @@ do shell script "\(uninstallCmd)" with administrator privileges with prompt "\(u
         var anePwr: Double = 0
         var pkgPwr: Double = 0
 
-        // Parse processor data
         if let processor = plist["processor"] as? [String: Any] {
-
-            // CPU cluster usage from idle_ratio (like asitop)
-            // M4 Max has E-Cluster, P0-Cluster, P1-Cluster - we average same-type clusters
             if let clusters = processor["clusters"] as? [[String: Any]] {
                 var eClusterUsages: [Double] = []
                 var pClusterUsages: [Double] = []
@@ -277,7 +242,6 @@ do shell script "\(uninstallCmd)" with administrator privileges with prompt "\(u
                     }
                 }
 
-                // Average all E-clusters and P-clusters (like asitop does)
                 if !eClusterUsages.isEmpty {
                     eCPU = eClusterUsages.reduce(0, +) / Double(eClusterUsages.count)
                 }
@@ -286,41 +250,33 @@ do shell script "\(uninstallCmd)" with administrator privileges with prompt "\(u
                 }
             }
 
-            // CPU power: cpu_energy is in mJ, convert to W
-            // Power = Energy / Time, where time = sampleIntervalMs / 1000
             if let cpuEnergy = processor["cpu_energy"] as? Double {
-                cpuPwr = cpuEnergy / sampleIntervalMs  // mJ / ms = W
+                cpuPwr = cpuEnergy / sampleIntervalMs
             }
 
-            // Package/combined power
             if let combinedPower = processor["combined_power"] as? Double {
                 pkgPwr = combinedPower / sampleIntervalMs
             } else if let packageEnergy = processor["package_energy"] as? Double {
                 pkgPwr = packageEnergy / sampleIntervalMs
             }
 
-            // ANE power
             if let aneEnergy = processor["ane_energy"] as? Double {
                 anePwr = aneEnergy / sampleIntervalMs
             }
         }
 
-        // GPU usage from idle_ratio
         if let gpuData = plist["gpu"] as? [String: Any],
            let idleRatio = gpuData["idle_ratio"] as? Double {
             gpu = (1.0 - idleRatio) * 100.0
         }
 
-        // GPU power
         if let gpuData = plist["gpu"] as? [String: Any],
            let gpuEnergy = gpuData["gpu_energy"] as? Double {
             gpuPwr = gpuEnergy / sampleIntervalMs
         }
 
-        // ANE usage estimate (based on power, max ~8W)
         let aneUsageEst = anePwr > 0 ? min((anePwr / 8.0) * 100.0, 100.0) : 0
 
-        // Update on main thread
         DispatchQueue.main.async {
             self.eCPUUsage = max(0, min(100, eCPU))
             self.pCPUUsage = max(0, min(100, pCPU))

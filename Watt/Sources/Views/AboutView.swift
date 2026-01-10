@@ -71,10 +71,6 @@ struct AboutView: View {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
     }
 
-    private func getBuildNumber() -> String {
-        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
-    }
-
     private func getGitHash() -> String {
         guard let url = Bundle.main.url(forResource: "GitHash", withExtension: "txt"),
               let hash = try? String(contentsOf: url, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines) else {

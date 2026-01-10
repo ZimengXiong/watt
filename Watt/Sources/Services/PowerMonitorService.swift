@@ -633,41 +633,7 @@ class PowerMonitorService: ObservableObject {
             charger.isAppleAdapter = true
         }
 
-        charger.chargerType = determineChargerType(charger: charger, properties: properties)
-
         return charger
-    }
-
-    private func determineChargerType(charger: ChargerInfo, properties: [String: Any]) -> ChargerType {
-        guard charger.isConnected else { return .none }
-
-        if let portInfo = properties["PortControllerInfo"] as? [[String: Any]] {
-            var activePortIndex: Int? = nil
-
-            for (index, port) in portInfo.enumerated() {
-                if let maxPower = port["PortControllerMaxPower"] as? Int,
-                   let nPDOs = port["PortControllerNPDOs"] as? Int,
-                   nPDOs > 0, maxPower > 0 {
-                    if charger.watts > 0 && abs(maxPower - charger.watts) <= 10 {
-                        activePortIndex = index
-                        break
-                    }
-                    if activePortIndex == nil {
-                        activePortIndex = index
-                    }
-                }
-            }
-
-            if let index = activePortIndex {
-                if index == 3 {
-                    return charger.isAppleAdapter ? .magsafeApple : .magsafeThirdParty
-                } else {
-                    return charger.isAppleAdapter ? .usbcApple : .usbcThirdParty
-                }
-            }
-        }
-
-        return charger.isAppleAdapter ? .usbcApple : .usbcThirdParty
     }
 
     private func readPowerTelemetry() -> PowerTelemetry? {

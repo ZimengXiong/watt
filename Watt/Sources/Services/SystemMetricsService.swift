@@ -3,9 +3,6 @@ import IOKit
 import Darwin
 import Combine
 
-// MARK: - System Metrics Service
-// Uses powermetrics daemon for accurate CPU/GPU/ANE metrics
-
 class SystemMetricsService: ObservableObject {
     @Published var metrics: SystemMetrics = SystemMetrics()
     @Published var isReady: Bool = false
@@ -79,8 +76,6 @@ class SystemMetricsService: ObservableObject {
         }
         .store(in: &cancellables)
     }
-
-    // MARK: - Chip Info
 
     private func readChipInfo() {
         var size = 0
@@ -159,8 +154,6 @@ class SystemMetricsService: ObservableObject {
         }
         return 0
     }
-
-    // MARK: - Memory Info (still uses system APIs - no sudo needed)
 
     private func startMemoryMonitoring() {
         memoryTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in

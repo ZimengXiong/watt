@@ -1,6 +1,20 @@
 import SwiftUI
 import ServiceManagement
 
+private func batteryColor(for level: Int) -> Color {
+    if level <= 20 { return .red }
+    if level <= 40 { return .orange }
+    return .green
+}
+
+private func batteryIcon(for level: Int) -> String {
+    if level <= 10 { return "battery.0" }
+    if level <= 25 { return "battery.25" }
+    if level <= 50 { return "battery.50" }
+    if level <= 75 { return "battery.75" }
+    return "battery.100"
+}
+
 struct ContentView: View {
     @ObservedObject var powerMonitor: PowerMonitorService
     @ObservedObject var systemMetrics: SystemMetricsService
@@ -116,7 +130,7 @@ struct BatterySection: View {
                         currentCapacityRaw: battery.currentCapacityRaw,
                         maxCapacity: battery.maxCapacity,
                         nominalVoltage: battery.nominalVoltage,
-                        color: batteryColor(level: battery.currentCapacity)
+                        color: batteryColor(for: battery.currentCapacity)
                     )
 
                     VStack(alignment: .leading, spacing: 4) {
@@ -152,12 +166,6 @@ struct BatterySection: View {
                 }
             }
         }
-    }
-
-    private func batteryColor(level: Int) -> Color {
-        if level <= 20 { return .red }
-        if level <= 40 { return .orange }
-        return .green
     }
 
     private func usbcPDSpecs(watts: Int) -> (voltage: Double, current: Double) {
@@ -323,7 +331,7 @@ struct PowerFlowSection: View {
                         PowerNodeView(
                             label: "Battery",
                             value: String(format: "%.1fW", batteryPower),
-                            icon: batteryIcon,
+                            icon: batteryIcon(for: powerMonitor.batteryInfo?.currentCapacity ?? 50),
                             color: .orange
                         )
                     }
@@ -338,8 +346,8 @@ struct PowerFlowSection: View {
                     PowerNodeView(
                         label: "Battery",
                         value: String(format: "%.1fW", batteryPower),
-                        icon: batteryIcon,
-                        color: batteryColor
+                        icon: batteryIcon(for: powerMonitor.batteryInfo?.currentCapacity ?? 50),
+                        color: batteryColor(for: powerMonitor.batteryInfo?.currentCapacity ?? 50)
                     )
                 }
 
@@ -372,22 +380,6 @@ struct PowerFlowSection: View {
                 }
             }
         }
-    }
-
-    private var batteryIcon: String {
-        let level = powerMonitor.batteryInfo?.currentCapacity ?? 50
-        if level <= 10 { return "battery.0" }
-        if level <= 25 { return "battery.25" }
-        if level <= 50 { return "battery.50" }
-        if level <= 75 { return "battery.75" }
-        return "battery.100"
-    }
-
-    private var batteryColor: Color {
-        let level = powerMonitor.batteryInfo?.currentCapacity ?? 50
-        if level <= 20 { return .red }
-        if level <= 40 { return .orange }
-        return .green
     }
 }
 
