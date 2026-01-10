@@ -33,7 +33,7 @@ struct AboutView: View {
 
                 VStack(spacing: 2) {
                     HStack(spacing: 4) {
-                        Text("Version \(getAppVersion()) (\(getBuildNumber()))")
+                        Text("Version \(getAppVersion())")
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(.secondary)
                         Text(getGitHash().uppercased())
