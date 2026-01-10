@@ -2,7 +2,7 @@
 
 A lightweight macOS menu bar app for real-time power monitoring on Apple Silicon Macs.
 
-<p align="center">
+<p align="left">
   <img src="Screenshots/main.png" alt="Watt" height="700">
 </p>
 
