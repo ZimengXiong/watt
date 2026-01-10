@@ -21,8 +21,7 @@ menu bar app that displays real-time power consumption in watts. monitor power d
 ### Homebrew
 
 ```bash
-brew tap zimengxiong/watt
-brew install watt
+brew install --cask zimengxiong/watt/watt
 ```
 
 ### Building from Source

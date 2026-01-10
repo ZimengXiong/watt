@@ -57,11 +57,11 @@ release: setup
 			--title "Watt v$$VERSION" \
 			--generate-notes && \
 		echo "GitHub release created: v$$VERSION" && \
-		sed -i '' "s/version \".*\"/version \"$$VERSION\"/" homebrew/watt.rb && \
-		sed -i '' "s/sha256 \".*\"/sha256 \"$$SHA\"/" homebrew/watt.rb && \
-		echo "Updated homebrew/watt.rb" && \
+		sed -i '' "s/version \".*\"/version \"$$VERSION\"/" homebrew/Casks/watt.rb && \
+		sed -i '' "s/sha256 \".*\"/sha256 \"$$SHA\"/" homebrew/Casks/watt.rb && \
+		echo "Updated homebrew/Casks/watt.rb" && \
 		cd homebrew && \
-		git add watt.rb && \
+		git add Casks/watt.rb && \
 		git commit -m "Update to v$$VERSION" && \
 		git push && \
 		echo "Pushed homebrew update to remote"
