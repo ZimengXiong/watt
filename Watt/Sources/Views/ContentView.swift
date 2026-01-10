@@ -645,9 +645,11 @@ struct FooterButtonStyle: ButtonStyle {
 
 struct SettingsView: View {
     @ObservedObject var powerMonitor: PowerMonitorService
+    @ObservedObject var daemon = PowerMetricsDaemon.shared
     @State private var costInput: String = ""
     @State private var zipCodeInput: String = ""
     @State private var showResetConfirmation: Bool = false
+    @State private var showUninstallConfirmation: Bool = false
 
     var body: some View {
         ZStack {
@@ -757,6 +759,48 @@ struct SettingsView: View {
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
+                    }
+                }
+
+                if daemon.isInstalled {
+                    SettingsSection(title: "Service") {
+                        if showUninstallConfirmation {
+                            HStack(spacing: 8) {
+                                Text("Remove service?")
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Button("Cancel") {
+                                    showUninstallConfirmation = false
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+
+                                Button("Remove") {
+                                    daemon.uninstall()
+                                    showUninstallConfirmation = false
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.small)
+                                .tint(.red)
+                            }
+                        } else {
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(.green)
+                                        .font(.system(size: 10))
+                                    Text("Metrics service installed")
+                                        .foregroundStyle(.secondary)
+                                }
+                                .font(.system(size: 11))
+
+                                Button("Uninstall Service") {
+                                    showUninstallConfirmation = true
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+                        }
                     }
                 }
             }
