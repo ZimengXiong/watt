@@ -23,6 +23,8 @@ class PowerMetricsDaemon: ObservableObject {
     private var readTimer: Timer?
     private let sampleIntervalMs: Double = 1000
     private var lastFileModDate: Date?
+    private var lastTruncateTime: Date = Date()
+    private let truncateIntervalSeconds: TimeInterval = 300  // Truncate file every 5 minutes
 
     init() {
         checkInstallation()
@@ -211,12 +213,30 @@ do shell script "\(uninstallCmd)" with administrator privileges with prompt "\(u
             lastFileModDate = modDate
         }
 
-        guard let data = fileManager.contents(atPath: metricsFilePath) else { return }
+        // CRITICAL FIX: Only read the TAIL of the file (last 64KB) instead of the entire file.
+        // The powermetrics file grows unbounded and can reach several GB,
+        // causing massive memory usage if we read it entirely.
+        guard let handle = FileHandle(forReadingAtPath: metricsFilePath) else { return }
+        defer { try? handle.close() }
+
+        let tailSize: UInt64 = 65536  // 64KB is plenty for a single plist sample (~8-15KB)
+        let fileSize = handle.seekToEndOfFile()
+
+        let readStart: UInt64
+        if fileSize > tailSize {
+            readStart = fileSize - tailSize
+            handle.seek(toFileOffset: readStart)
+        } else {
+            handle.seek(toFileOffset: 0)
+        }
+
+        let data = handle.readDataToEndOfFile()
+        guard !data.isEmpty else { return }
 
         // Find the last null-separated chunk (plist boundary)
         guard let lastNullIndex = data.lastIndex(of: 0),
               lastNullIndex < data.count - 100 else {
-            // Try parsing entire file if no null separator
+            // Try parsing entire tail if no null separator (small file case)
             if let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] {
                 parseMetrics(plist)
             }
@@ -230,6 +250,38 @@ do shell script "\(uninstallCmd)" with administrator privileges with prompt "\(u
         }
 
         parseMetrics(plist)
+
+        // Periodically truncate the file to prevent unbounded disk growth
+        // The powermetrics daemon will keep appending, so we truncate occasionally
+        if Date().timeIntervalSince(lastTruncateTime) > truncateIntervalSeconds && fileSize > 1_000_000 {
+            truncateMetricsFile()
+            lastTruncateTime = Date()
+        }
+    }
+
+    private func truncateMetricsFile() {
+        // Truncate by removing old data - powermetrics will continue appending
+        // We keep the last chunk so there's no gap in data
+        guard let handle = FileHandle(forUpdatingAtPath: metricsFilePath) else { return }
+        defer { try? handle.close() }
+
+        let fileSize = handle.seekToEndOfFile()
+        guard fileSize > 100_000 else { return }  // Only truncate if > 100KB
+
+        // Read last 32KB to preserve recent data
+        let keepSize: UInt64 = 32768
+        handle.seek(toFileOffset: fileSize - keepSize)
+        let lastData = handle.readDataToEndOfFile()
+
+        // Find the start of a complete plist (after a null byte)
+        guard let nullIndex = lastData.firstIndex(of: 0) else { return }
+        let cleanData = lastData.suffix(from: lastData.index(after: nullIndex))
+        guard !cleanData.isEmpty else { return }
+
+        // Rewrite file with only the recent data
+        handle.seek(toFileOffset: 0)
+        handle.write(Data(cleanData))
+        handle.truncateFile(atOffset: UInt64(cleanData.count))
     }
 
     private func parseMetrics(_ plist: [String: Any]) {
