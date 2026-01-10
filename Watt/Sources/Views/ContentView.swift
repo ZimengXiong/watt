@@ -527,45 +527,64 @@ struct StatColumn: View {
 struct PowerGraph: View {
     let readings: [EnergyReading]
 
+    // Pre-compute values to avoid repeated calculations
+    private var powerValues: [Double] {
+        readings.map { $0.power }
+    }
+
+    private var maxP: Double {
+        max(powerValues.max() ?? 1, 1)
+    }
+
+    private var minP: Double {
+        max(0, (powerValues.min() ?? 0) * 0.8)
+    }
+
+    private var range: Double {
+        max(maxP - minP, 0.1)
+    }
+
     var body: some View {
         GeometryReader { geo in
-            let maxP = max(readings.map { $0.power }.max() ?? 1, 1)
-            let minP = max(0, (readings.map { $0.power }.min() ?? 0) * 0.8)
-            let range = max(maxP - minP, 0.1)
+            Canvas { context, size in
+                guard readings.count > 1 else { return }
 
-            ZStack {
-                Path { path in
-                    guard readings.count > 1 else { return }
-                    let step = geo.size.width / CGFloat(readings.count - 1)
-                    path.move(to: CGPoint(x: 0, y: geo.size.height))
-                    for (i, r) in readings.enumerated() {
-                        let x = CGFloat(i) * step
-                        let y = geo.size.height * (1 - CGFloat((r.power - minP) / range))
-                        path.addLine(to: CGPoint(x: x, y: y))
-                    }
-                    path.addLine(to: CGPoint(x: geo.size.width, y: geo.size.height))
-                    path.closeSubpath()
+                let step = size.width / CGFloat(readings.count - 1)
+
+                // Build fill path
+                var fillPath = Path()
+                fillPath.move(to: CGPoint(x: 0, y: size.height))
+                for (i, power) in powerValues.enumerated() {
+                    let x = CGFloat(i) * step
+                    let y = size.height * (1 - CGFloat((power - minP) / range))
+                    fillPath.addLine(to: CGPoint(x: x, y: y))
                 }
-                .fill(
-                    LinearGradient(
-                        colors: [Color.accentColor.opacity(0.15), Color.accentColor.opacity(0.02)],
-                        startPoint: .top,
-                        endPoint: .bottom
+                fillPath.addLine(to: CGPoint(x: size.width, y: size.height))
+                fillPath.closeSubpath()
+
+                // Build stroke path
+                var strokePath = Path()
+                for (i, power) in powerValues.enumerated() {
+                    let x = CGFloat(i) * step
+                    let y = size.height * (1 - CGFloat((power - minP) / range))
+                    if i == 0 { strokePath.move(to: CGPoint(x: x, y: y)) }
+                    else { strokePath.addLine(to: CGPoint(x: x, y: y)) }
+                }
+
+                // Draw fill
+                context.fill(
+                    fillPath,
+                    with: .linearGradient(
+                        Gradient(colors: [Color.accentColor.opacity(0.15), Color.accentColor.opacity(0.02)]),
+                        startPoint: .zero,
+                        endPoint: CGPoint(x: 0, y: size.height)
                     )
                 )
 
-                Path { path in
-                    guard readings.count > 1 else { return }
-                    let step = geo.size.width / CGFloat(readings.count - 1)
-                    for (i, r) in readings.enumerated() {
-                        let x = CGFloat(i) * step
-                        let y = geo.size.height * (1 - CGFloat((r.power - minP) / range))
-                        if i == 0 { path.move(to: CGPoint(x: x, y: y)) }
-                        else { path.addLine(to: CGPoint(x: x, y: y)) }
-                    }
-                }
-                .stroke(
-                    Color.accentColor,
+                // Draw stroke
+                context.stroke(
+                    strokePath,
+                    with: .color(.accentColor),
                     style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
                 )
             }

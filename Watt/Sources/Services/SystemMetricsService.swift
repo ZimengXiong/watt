@@ -10,6 +10,9 @@ class SystemMetricsService: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var memoryTimer: Timer?
 
+    // Cache the host port to avoid Mach port leaks
+    private let hostPort: mach_port_t = mach_host_self()
+
     // PowerMetrics daemon for accurate metrics
     let powerMetricsDaemon = PowerMetricsDaemon.shared
 
@@ -34,45 +37,44 @@ class SystemMetricsService: ObservableObject {
     private func setupPowerMetricsBinding() {
         // Subscribe to daemon installation status
         powerMetricsDaemon.$isInstalled
+            .removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] installed in
                 self?.isReady = installed
             }
             .store(in: &cancellables)
 
-        // Subscribe to daemon metrics
+        // Subscribe to daemon metrics - throttle to reduce UI updates
         Publishers.CombineLatest4(
             powerMetricsDaemon.$eCPUUsage,
             powerMetricsDaemon.$pCPUUsage,
             powerMetricsDaemon.$gpuUsage,
             powerMetricsDaemon.$aneUsage
         )
-        .receive(on: DispatchQueue.main)
+        .throttle(for: .milliseconds(500), scheduler: DispatchQueue.main, latest: true)
         .sink { [weak self] eCPU, pCPU, gpu, ane in
             guard let self = self else { return }
             self.metrics.eCPU.usage = eCPU
             self.metrics.pCPU.usage = pCPU
             self.metrics.gpu.usage = gpu
             self.metrics.ane.usage = ane
-            self.objectWillChange.send()
         }
         .store(in: &cancellables)
 
-        // Subscribe to power metrics
+        // Subscribe to power metrics - throttle to reduce UI updates
         Publishers.CombineLatest4(
             powerMetricsDaemon.$cpuPower,
             powerMetricsDaemon.$gpuPower,
             powerMetricsDaemon.$anePower,
             powerMetricsDaemon.$packagePower
         )
-        .receive(on: DispatchQueue.main)
+        .throttle(for: .milliseconds(500), scheduler: DispatchQueue.main, latest: true)
         .sink { [weak self] cpu, gpu, ane, pkg in
             guard let self = self else { return }
             self.metrics.cpuPower = cpu
             self.metrics.gpuPower = gpu
             self.metrics.anePower = ane
             self.metrics.packagePower = pkg
-            self.objectWillChange.send()
         }
         .store(in: &cancellables)
     }
@@ -156,7 +158,7 @@ class SystemMetricsService: ObservableObject {
     }
 
     private func startMemoryMonitoring() {
-        memoryTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+        memoryTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.readMemoryInfo()
         }
     }
@@ -176,7 +178,7 @@ class SystemMetricsService: ObservableObject {
 
         let result = withUnsafeMutablePointer(to: &vmStats) {
             $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
-                host_statistics64(mach_host_self(), HOST_VM_INFO64, $0, &count)
+                host_statistics64(hostPort, HOST_VM_INFO64, $0, &count)
             }
         }
 

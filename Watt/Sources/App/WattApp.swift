@@ -18,7 +18,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var powerMonitor: PowerMonitorService?
     var systemMetrics: SystemMetricsService?
     private var cancellables = Set<AnyCancellable>()
-    private var statusBarTimer: DispatchSourceTimer?
     private var globalEventMonitor: Any?
     private var localEventMonitor: Any?
 
@@ -43,13 +42,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func setupRealtimeUpdates() {
-        statusBarTimer = DispatchSource.makeTimerSource(queue: .main)
-        statusBarTimer?.schedule(deadline: .now(), repeating: .milliseconds(500))
-        statusBarTimer?.setEventHandler { [weak self] in
-            self?.updateStatusBarIcon()
-        }
-        statusBarTimer?.resume()
-
+        // Update status bar when power monitor publishes changes (every 1s)
         powerMonitor?.objectWillChange
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in

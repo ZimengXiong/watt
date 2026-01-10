@@ -138,7 +138,7 @@ struct MemoryBarView: View {
     }
 }
 
-// MARK: - Usage Bar Graph (htop-style)
+// MARK: - Usage Bar Graph (htop-style) - Optimized with Canvas
 
 struct UsageBarGraph: View {
     let value: Double  // 0.0 - 1.0
@@ -146,77 +146,67 @@ struct UsageBarGraph: View {
     let color: Color
 
     var body: some View {
-        GeometryReader { geo in
+        Canvas { context, size in
             let barCount = coreCount > 0 ? coreCount : 8
             let spacing: CGFloat = 1
             let totalSpacing = CGFloat(barCount - 1) * spacing
-            let barWidth = (geo.size.width - totalSpacing) / CGFloat(barCount)
+            let barWidth = (size.width - totalSpacing) / CGFloat(barCount)
+            let filledBars = value * Double(barCount)
 
-            HStack(spacing: spacing) {
-                ForEach(0..<barCount, id: \.self) { index in
-                    VerticalBar(
-                        fillPercent: barFillPercent(for: index, total: barCount),
-                        color: color
-                    )
-                    .frame(width: barWidth)
+            for index in 0..<barCount {
+                let x = CGFloat(index) * (barWidth + spacing)
+
+                // Background bar
+                let bgRect = CGRect(x: x, y: 0, width: barWidth, height: size.height)
+                context.fill(
+                    RoundedRectangle(cornerRadius: 1).path(in: bgRect),
+                    with: .color(Color.primary.opacity(0.08))
+                )
+
+                // Fill bar
+                let barIndex = Double(index)
+                let fillPercent: Double
+                if barIndex < filledBars - 1 {
+                    fillPercent = 1.0
+                } else if barIndex < filledBars {
+                    fillPercent = filledBars - barIndex
+                } else {
+                    fillPercent = 0.05
                 }
+
+                let fillHeight = size.height * CGFloat(min(max(fillPercent, 0), 1))
+                let fillRect = CGRect(x: x, y: size.height - fillHeight, width: barWidth, height: fillHeight)
+                context.fill(
+                    RoundedRectangle(cornerRadius: 1).path(in: fillRect),
+                    with: .color(color.opacity(0.8))
+                )
             }
-        }
-    }
-
-    private func barFillPercent(for index: Int, total: Int) -> Double {
-        let filledBars = value * Double(total)
-        let barIndex = Double(index)
-
-        if barIndex < filledBars - 1 {
-            return 1.0
-        } else if barIndex < filledBars {
-            return filledBars - barIndex
-        } else {
-            return 0.05
         }
     }
 }
 
-struct VerticalBar: View {
-    let fillPercent: Double
-    let color: Color
-
-    var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .bottom) {
-                Rectangle()
-                    .fill(Color.primary.opacity(0.08))
-
-                Rectangle()
-                    .fill(color.opacity(0.8))
-                    .frame(height: geo.size.height * CGFloat(min(max(fillPercent, 0), 1)))
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 1, style: .continuous))
-    }
-}
-
-// MARK: - Linear Usage Bar
+// MARK: - Linear Usage Bar - Optimized with Canvas
 
 struct LinearUsageBar: View {
     let value: Double
     let color: Color
 
     var body: some View {
-        GeometryReader { geo in
-            let barCount = Int(geo.size.width / 4)
+        Canvas { context, size in
+            let barCount = max(Int(size.width / 4), 1)
             let spacing: CGFloat = 1
             let totalSpacing = CGFloat(barCount - 1) * spacing
-            let barWidth = (geo.size.width - totalSpacing) / CGFloat(barCount)
+            let barWidth = (size.width - totalSpacing) / CGFloat(barCount)
 
-            HStack(spacing: spacing) {
-                ForEach(0..<barCount, id: \.self) { index in
-                    let isFilled = Double(index) / Double(barCount) < value
-                    Rectangle()
-                        .fill(isFilled ? color.opacity(0.8) : Color.primary.opacity(0.08))
-                        .frame(width: barWidth)
-                }
+            for index in 0..<barCount {
+                let x = CGFloat(index) * (barWidth + spacing)
+                let isFilled = Double(index) / Double(barCount) < value
+                let rect = CGRect(x: x, y: 0, width: barWidth, height: size.height)
+
+                context.fill(
+                    Rectangle().path(in: rect),
+                    with: .color(isFilled ? color.opacity(0.8) : Color.primary.opacity(0.08))
+                )
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 2, style: .continuous))

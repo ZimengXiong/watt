@@ -10,7 +10,15 @@ struct PowerTelemetry {
 }
 
 struct EnergyReading: Identifiable {
-    let id = UUID()
+    private static var counter: Int = 0
+    let id: Int
     let timestamp: Date
     let power: Double
+
+    init(timestamp: Date, power: Double) {
+        EnergyReading.counter += 1
+        self.id = EnergyReading.counter
+        self.timestamp = timestamp
+        self.power = power
+    }
 }

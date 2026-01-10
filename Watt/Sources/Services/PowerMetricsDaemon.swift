@@ -21,7 +21,8 @@ class PowerMetricsDaemon: ObservableObject {
     @Published var packagePower: Double = 0
 
     private var readTimer: Timer?
-    private let sampleIntervalMs: Double = 500
+    private let sampleIntervalMs: Double = 1000
+    private var lastFileModDate: Date?
 
     init() {
         checkInstallation()
@@ -198,17 +199,33 @@ do shell script "\(uninstallCmd)" with administrator privileges with prompt "\(u
     }
 
     private func readMetricsFile() {
-        guard FileManager.default.fileExists(atPath: metricsFilePath),
-              let data = FileManager.default.contents(atPath: metricsFilePath) else {
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: metricsFilePath) else { return }
+
+        // Skip parsing if file hasn't been modified
+        if let attrs = try? fileManager.attributesOfItem(atPath: metricsFilePath),
+           let modDate = attrs[.modificationDate] as? Date {
+            if let lastMod = lastFileModDate, modDate <= lastMod {
+                return
+            }
+            lastFileModDate = modDate
+        }
+
+        guard let data = fileManager.contents(atPath: metricsFilePath) else { return }
+
+        // Find the last null-separated chunk (plist boundary)
+        guard let lastNullIndex = data.lastIndex(of: 0),
+              lastNullIndex < data.count - 100 else {
+            // Try parsing entire file if no null separator
+            if let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] {
+                parseMetrics(plist)
+            }
             return
         }
 
-        let chunks = data.split(separator: 0)
-        guard let lastChunk = chunks.last, lastChunk.count > 100 else {
-            return
-        }
-
-        guard let plist = try? PropertyListSerialization.propertyList(from: Data(lastChunk), options: [], format: nil) as? [String: Any] else {
+        let lastChunk = data.suffix(from: data.index(after: lastNullIndex))
+        guard lastChunk.count > 100,
+              let plist = try? PropertyListSerialization.propertyList(from: Data(lastChunk), options: [], format: nil) as? [String: Any] else {
             return
         }
 

@@ -33,6 +33,7 @@ private func fourCharCode(_ s: String) -> UInt32 {
 private class SMCReader {
     private var connection: io_connect_t = 0
     private var isConnected = false
+    private var keyInfoCache: [UInt32: SMCKeyInfoData] = [:]
 
     init() {
         connect()
@@ -54,12 +55,13 @@ private class SMCReader {
         }
     }
 
-    func readFloat(_ key: String) -> Float? {
-        guard isConnected else { return nil }
+    private func getKeyInfo(_ keyCode: UInt32) -> SMCKeyInfoData? {
+        if let cached = keyInfoCache[keyCode] {
+            return cached
+        }
 
-        // Get key info
         var inp = SMCParamStruct()
-        inp.key = fourCharCode(key)
+        inp.key = keyCode
         inp.data8 = 9  // kSMCGetKeyInfo
 
         var out = SMCParamStruct()
@@ -67,25 +69,32 @@ private class SMCReader {
         guard IOConnectCallStructMethod(connection, 2, &inp, MemoryLayout<SMCParamStruct>.size, &out, &outSz) == kIOReturnSuccess,
               out.result == 0 else { return nil }
 
-        let size = out.keyInfo.dataSize
-        guard size == 4 else { return nil }
+        keyInfoCache[keyCode] = out.keyInfo
+        return out.keyInfo
+    }
+
+    func readFloat(_ key: String) -> Float? {
+        guard isConnected else { return nil }
+
+        let keyCode = fourCharCode(key)
+
+        // Get cached key info
+        guard let keyInfo = getKeyInfo(keyCode), keyInfo.dataSize == 4 else { return nil }
 
         // Read bytes
-        inp = SMCParamStruct()
-        inp.key = fourCharCode(key)
-        inp.keyInfo.dataSize = size
+        var inp = SMCParamStruct()
+        inp.key = keyCode
+        inp.keyInfo.dataSize = keyInfo.dataSize
         inp.data8 = 5  // kSMCReadKey
 
-        out = SMCParamStruct()
-        outSz = MemoryLayout<SMCParamStruct>.size
+        var out = SMCParamStruct()
+        var outSz = MemoryLayout<SMCParamStruct>.size
         guard IOConnectCallStructMethod(connection, 2, &inp, MemoryLayout<SMCParamStruct>.size, &out, &outSz) == kIOReturnSuccess,
               out.result == 0 else { return nil }
 
-        // Extract bytes and convert to little-endian float
-        var bytes: [UInt8] = []
-        withUnsafeBytes(of: out.bytes) { for i in 0..<4 { bytes.append($0[i]) } }
-
-        let value: UInt32 = UInt32(bytes[0]) | UInt32(bytes[1]) << 8 | UInt32(bytes[2]) << 16 | UInt32(bytes[3]) << 24
+        // Extract bytes and convert to little-endian float (inline for speed)
+        let bytes = out.bytes
+        let value: UInt32 = UInt32(bytes.0) | UInt32(bytes.1) << 8 | UInt32(bytes.2) << 16 | UInt32(bytes.3) << 24
         return Float(bitPattern: value)
     }
 }
@@ -103,10 +112,12 @@ class PowerMonitorService: ObservableObject {
     @Published var portInfo: PortInfo?
     @Published var energyHistory: [EnergyReading] = []
 
-    @Published var currentPower: Double = 0
-    @Published var wallPower: Double = 0
-    @Published var batteryPower: Double = 0
-    @Published var systemPower: Double = 0
+    // Power values - use internal storage with change threshold to reduce UI updates
+    @Published private(set) var currentPower: Double = 0
+    @Published private(set) var wallPower: Double = 0
+    @Published private(set) var batteryPower: Double = 0
+    @Published private(set) var systemPower: Double = 0
+    private let powerChangeThreshold: Double = 0.05  // Only update UI if change > 0.05W
     @Published var lifetimeEnergyUsed: Double = 0  // Wh
     @Published var lifetimeSessionCount: Int = 0
     @Published var todayEnergyUsed: Double = 0  // Wh
@@ -159,7 +170,7 @@ class PowerMonitorService: ObservableObject {
 
         let queue = DispatchQueue(label: "com.watt.powermonitor", qos: .userInteractive)
         timer = DispatchSource.makeTimerSource(queue: queue)
-        timer?.schedule(deadline: .now(), repeating: .milliseconds(500))
+        timer?.schedule(deadline: .now(), repeating: .milliseconds(1000))
         timer?.setEventHandler { [weak self] in
             self?.updateAllReadings()
         }
@@ -393,47 +404,61 @@ class PowerMonitorService: ObservableObject {
             self.powerTelemetry = telemetry
             self.portInfo = port
 
-            self.systemPower = Double(smcSystem)
-            self.batteryPower = Double(smcBattery)
+            // Only update power values if they changed significantly
+            let newSystemPower = Double(smcSystem)
+            let newBatteryPower = Double(smcBattery)
+            if abs(newSystemPower - self.systemPower) > self.powerChangeThreshold {
+                self.systemPower = newSystemPower
+            }
+            if abs(newBatteryPower - self.batteryPower) > self.powerChangeThreshold {
+                self.batteryPower = newBatteryPower
+            }
 
             // Compute wall power from system + charging for better sync
             // batteryPower is positive when discharging, negative when charging
-            // When charging: wallPower = systemPower + |chargingPower|
-            // When discharging: wallPower should be 0 (on battery)
+            var newWallPower: Double
             if self.batteryPower < 0 {
                 // Charging: wall supplies system + battery charging
-                self.wallPower = self.systemPower + abs(self.batteryPower)
+                newWallPower = self.systemPower + abs(self.batteryPower)
             } else if battery?.isPluggedIn == true {
                 // Plugged in but not charging (or discharging to supplement)
-                self.wallPower = max(0, self.systemPower - self.batteryPower)
+                newWallPower = max(0, self.systemPower - self.batteryPower)
             } else {
                 // On battery
-                self.wallPower = 0
+                newWallPower = 0
             }
 
             // If computed wall power seems off, fall back to SMC reading
-            if self.wallPower <= 0 && smcWall > 0 && battery?.isPluggedIn == true {
-                self.wallPower = Double(smcWall)
+            if newWallPower <= 0 && smcWall > 0 && battery?.isPluggedIn == true {
+                newWallPower = Double(smcWall)
+            }
+
+            // Only update if changed significantly
+            if abs(newWallPower - self.wallPower) > self.powerChangeThreshold {
+                self.wallPower = newWallPower
             }
 
             // currentPower = system power (compute usage only, excludes charging)
             // Priority: SMC system > telemetry system > battery discharge > computed from V*A
+            var newCurrentPower: Double = 0
             if self.systemPower > 0 {
-                self.currentPower = self.systemPower
+                newCurrentPower = self.systemPower
             } else if let telemetry = telemetry, telemetry.systemPower > 0 {
-                self.currentPower = telemetry.systemPower
+                newCurrentPower = telemetry.systemPower
             } else if self.batteryPower > 0 {
                 // On battery: battery discharge = system consumption
-                self.currentPower = self.batteryPower
+                newCurrentPower = self.batteryPower
             } else if let telemetry = telemetry, telemetry.batteryPower > 0 {
-                self.currentPower = telemetry.batteryPower
+                newCurrentPower = telemetry.batteryPower
             } else if let battery = battery, battery.powerUsage > 0 {
-                self.currentPower = battery.powerUsage
-            } else {
-                self.currentPower = 0
+                newCurrentPower = battery.powerUsage
             }
 
-            self.objectWillChange.send()
+            // Only update if changed significantly
+            if abs(newCurrentPower - self.currentPower) > self.powerChangeThreshold {
+                self.currentPower = newCurrentPower
+            }
+
             self.updateEnergyTracking()
         }
     }
