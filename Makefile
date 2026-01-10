@@ -26,6 +26,10 @@ build: setup
 	@echo "Build completed: $(APP_PATH)"
 
 release: setup
+	@if [ -n "$$(git status --porcelain)" ]; then \
+		echo "Error: Working directory has uncommitted changes. Commit or stash them first."; \
+		exit 1; \
+	fi
 	@mkdir -p $(BUILD_DIR)
 	@xcodebuild -project $(PROJECT_NAME).xcodeproj \
 		-scheme $(SCHEME) \
@@ -39,12 +43,24 @@ release: setup
 	@cd $(DERIVED_DATA)/Build/Products/Release && zip -rq $(PROJECT_NAME).app.zip $(PROJECT_NAME).app
 	@mv $(DERIVED_DATA)/Build/Products/Release/$(PROJECT_NAME).app.zip $(BUILD_DIR)/release/
 	@echo "Package: $(BUILD_DIR)/release/$(PROJECT_NAME).app.zip"
-	@SHA=$$(shasum -a 256 $(BUILD_DIR)/release/$(PROJECT_NAME).app.zip | cut -d' ' -f1) && \
+	@VERSION=$$(grep 'MARKETING_VERSION:' project.yml | sed 's/.*: //') && \
+		SHA=$$(shasum -a 256 $(BUILD_DIR)/release/$(PROJECT_NAME).app.zip | cut -d' ' -f1) && \
+		echo "Version: $$VERSION" && \
+		echo "SHA256: $$SHA" && \
+		echo "Creating git tag v$$VERSION..." && \
+		git tag -a "v$$VERSION" -m "Release v$$VERSION" && \
+		git push origin "v$$VERSION" && \
+		echo "Creating GitHub release v$$VERSION..." && \
+		gh release create "v$$VERSION" $(BUILD_DIR)/release/$(PROJECT_NAME).app.zip \
+			--title "Watt v$$VERSION" \
+			--generate-notes && \
+		echo "GitHub release created: v$$VERSION" && \
+		sed -i '' "s/version \".*\"/version \"$$VERSION\"/" homebrew/watt.rb && \
 		sed -i '' "s/sha256 \".*\"/sha256 \"$$SHA\"/" homebrew/watt.rb && \
-		echo "Updated homebrew/watt.rb with SHA256: $$SHA" && \
+		echo "Updated homebrew/watt.rb" && \
 		cd homebrew && \
 		git add watt.rb && \
-		git commit -m "Update cask SHA256 to $$SHA" && \
+		git commit -m "Update to v$$VERSION" && \
 		git push && \
 		echo "Pushed homebrew update to remote"
 
