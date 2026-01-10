@@ -1,5 +1,5 @@
 <p align="left">
-  <img src="screenshots/icon.png" alt="Watt" width="64" height="64">
+  <img src="Screenshots/icon.png" alt="Watt" width="64" height="64">
 </p>
 
 # watt
@@ -7,7 +7,7 @@
 menu bar app that displays real-time power consumption in watts. monitor power draw, battery health, and energy costs.
 
 <p align="left">
-  <img src="screenshots/screenshot.png" alt="Watt" height="400">
+  <img src="Screenshots/mainpage.png" alt="Watt" height="400">
 </p>
 
 `watt` reads power data from multiple macOS system sources:
@@ -48,5 +48,5 @@ Download the latest release from the [Releases](https://github.com/zimengxiong/w
 # Extra
 
 <p align="left">
-  <img src="screenshots/extra.png" alt="Watt" height="600">
+  <img src="Screenshots/extra.png" alt="Watt" height="600">
 </p>
