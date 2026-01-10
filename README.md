@@ -12,7 +12,7 @@ menu bar app that displays real-time power consumption in watts. monitor power d
 
 `watt` reads power data from multiple macOS system sources:
 
-- **SMC (System Management Controller)**: Real-time power readings via SMC keys (`PSTR`, `PDTR`, `SBAP`)
+- **SMC**: Real-time power readings via SMC keys (`PSTR`, `PDTR`, `SBAP`)
 - **IOKit**: Battery properties from `AppleSmartBattery` including voltage, amperage, capacity, and health
 - **IOPowerSources**: Charger details and power adapter information
 
