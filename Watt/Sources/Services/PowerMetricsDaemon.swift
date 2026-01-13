@@ -24,7 +24,8 @@ class PowerMetricsDaemon: ObservableObject {
     private let sampleIntervalMs: Double = 1000
     private var lastFileModDate: Date?
     private var lastTruncateTime: Date = Date()
-    private let truncateIntervalSeconds: TimeInterval = 300  // Truncate file every 5 minutes
+    private let truncateIntervalSeconds: TimeInterval = 300
+    private var isAppVisible: Bool = false
 
     init() {
         checkInstallation()
@@ -35,12 +36,8 @@ class PowerMetricsDaemon: ObservableObject {
     }
 
     func checkInstallation() {
-        let daemonExists = FileManager.default.fileExists(atPath: daemonPlistPath)
-        isInstalled = daemonExists
-
-        if daemonExists {
-            startReading()
-        }
+        isInstalled = FileManager.default.fileExists(atPath: daemonPlistPath)
+        if isInstalled { startReading() }
     }
 
     func install() {
@@ -190,9 +187,7 @@ do shell script "\(uninstallCmd)" with administrator privileges with prompt "\(u
     func startReading() {
         stopReading()
         readMetricsFile()
-        readTimer = Timer.scheduledTimer(withTimeInterval: sampleIntervalMs / 1000.0, repeats: true) { [weak self] _ in
-            self?.readMetricsFile()
-        }
+        restartTimerWithCurrentInterval()
     }
 
     func stopReading() {
@@ -200,16 +195,29 @@ do shell script "\(uninstallCmd)" with administrator privileges with prompt "\(u
         readTimer = nil
     }
 
-    private func readMetricsFile() {
-        let fileManager = FileManager.default
-        guard fileManager.fileExists(atPath: metricsFilePath) else { return }
+    func setAppVisible(_ visible: Bool) {
+        isAppVisible = visible
+        restartTimerWithCurrentInterval()
+    }
 
-        // Skip parsing if file hasn't been modified
-        if let attrs = try? fileManager.attributesOfItem(atPath: metricsFilePath),
-           let modDate = attrs[.modificationDate] as? Date {
-            if let lastMod = lastFileModDate, modDate <= lastMod {
-                return
-            }
+    private func restartTimerWithCurrentInterval() {
+        readTimer?.invalidate()
+
+        let interval: TimeInterval = isAppVisible ? 1.0 : 2.0
+        let tolerance: TimeInterval = isAppVisible ? 0.1 : 0.5
+
+        readTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            self?.readMetricsFile()
+        }
+        readTimer?.tolerance = tolerance
+    }
+
+    private func readMetricsFile() {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: metricsFilePath) else { return }
+
+        if let modDate = (try? fm.attributesOfItem(atPath: metricsFilePath))?[.modificationDate] as? Date {
+            if let lastMod = lastFileModDate, modDate <= lastMod { return }
             lastFileModDate = modDate
         }
 
@@ -233,26 +241,17 @@ do shell script "\(uninstallCmd)" with administrator privileges with prompt "\(u
         let data = handle.readDataToEndOfFile()
         guard !data.isEmpty else { return }
 
-        // Find the last null-separated chunk (plist boundary)
-        guard let lastNullIndex = data.lastIndex(of: 0),
-              lastNullIndex < data.count - 100 else {
-            // Try parsing entire tail if no null separator (small file case)
-            if let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] {
-                parseMetrics(plist)
-            }
-            return
+        let plistData: Data
+        if let nullIdx = data.lastIndex(of: 0), nullIdx < data.count - 100 {
+            plistData = Data(data.suffix(from: data.index(after: nullIdx)))
+        } else {
+            plistData = data
         }
 
-        let lastChunk = data.suffix(from: data.index(after: lastNullIndex))
-        guard lastChunk.count > 100,
-              let plist = try? PropertyListSerialization.propertyList(from: Data(lastChunk), options: [], format: nil) as? [String: Any] else {
-            return
-        }
-
+        guard plistData.count > 100,
+              let plist = try? PropertyListSerialization.propertyList(from: plistData, options: [], format: nil) as? [String: Any] else { return }
         parseMetrics(plist)
 
-        // Periodically truncate the file to prevent unbounded disk growth
-        // The powermetrics daemon will keep appending, so we truncate occasionally
         if Date().timeIntervalSince(lastTruncateTime) > truncateIntervalSeconds && fileSize > 1_000_000 {
             truncateMetricsFile()
             lastTruncateTime = Date()
@@ -260,101 +259,52 @@ do shell script "\(uninstallCmd)" with administrator privileges with prompt "\(u
     }
 
     private func truncateMetricsFile() {
-        // Truncate by removing old data - powermetrics will continue appending
-        // We keep the last chunk so there's no gap in data
         guard let handle = FileHandle(forUpdatingAtPath: metricsFilePath) else { return }
         defer { try? handle.close() }
-
         let fileSize = handle.seekToEndOfFile()
-        guard fileSize > 100_000 else { return }  // Only truncate if > 100KB
+        guard fileSize > 100_000 else { return }
 
-        // Read last 32KB to preserve recent data
-        let keepSize: UInt64 = 32768
-        handle.seek(toFileOffset: fileSize - keepSize)
+        handle.seek(toFileOffset: fileSize - 32768)
         let lastData = handle.readDataToEndOfFile()
-
-        // Find the start of a complete plist (after a null byte)
-        guard let nullIndex = lastData.firstIndex(of: 0) else { return }
-        let cleanData = lastData.suffix(from: lastData.index(after: nullIndex))
+        guard let nullIdx = lastData.firstIndex(of: 0) else { return }
+        let cleanData = Data(lastData.suffix(from: lastData.index(after: nullIdx)))
         guard !cleanData.isEmpty else { return }
 
-        // Rewrite file with only the recent data
         handle.seek(toFileOffset: 0)
-        handle.write(Data(cleanData))
+        handle.write(cleanData)
         handle.truncateFile(atOffset: UInt64(cleanData.count))
     }
 
     private func parseMetrics(_ plist: [String: Any]) {
-        var eCPU: Double = 0
-        var pCPU: Double = 0
-        var gpu: Double = 0
-        var cpuPwr: Double = 0
-        var gpuPwr: Double = 0
-        var anePwr: Double = 0
-        var pkgPwr: Double = 0
+        var (eCPU, pCPU, gpu, cpuPwr, gpuPwr, anePwr, pkgPwr) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
-        if let processor = plist["processor"] as? [String: Any] {
-            if let clusters = processor["clusters"] as? [[String: Any]] {
-                var eClusterUsages: [Double] = []
-                var pClusterUsages: [Double] = []
-
-                for cluster in clusters {
-                    guard let name = cluster["name"] as? String,
-                          let idleRatio = cluster["idle_ratio"] as? Double else { continue }
-
-                    let usage = (1.0 - idleRatio) * 100.0
-
-                    if name.hasPrefix("E") {
-                        eClusterUsages.append(usage)
-                    } else if name.hasPrefix("P") {
-                        pClusterUsages.append(usage)
-                    }
+        if let proc = plist["processor"] as? [String: Any] {
+            if let clusters = proc["clusters"] as? [[String: Any]] {
+                var (eUsages, pUsages) = ([Double](), [Double]())
+                for c in clusters {
+                    guard let name = c["name"] as? String, let idle = c["idle_ratio"] as? Double else { continue }
+                    let usage = (1.0 - idle) * 100.0
+                    (name.hasPrefix("E") ? &eUsages : &pUsages).append(usage)
                 }
-
-                if !eClusterUsages.isEmpty {
-                    eCPU = eClusterUsages.reduce(0, +) / Double(eClusterUsages.count)
-                }
-                if !pClusterUsages.isEmpty {
-                    pCPU = pClusterUsages.reduce(0, +) / Double(pClusterUsages.count)
-                }
+                if !eUsages.isEmpty { eCPU = eUsages.reduce(0, +) / Double(eUsages.count) }
+                if !pUsages.isEmpty { pCPU = pUsages.reduce(0, +) / Double(pUsages.count) }
             }
-
-            if let cpuEnergy = processor["cpu_energy"] as? Double {
-                cpuPwr = cpuEnergy / sampleIntervalMs
-            }
-
-            if let combinedPower = processor["combined_power"] as? Double {
-                pkgPwr = combinedPower / sampleIntervalMs
-            } else if let packageEnergy = processor["package_energy"] as? Double {
-                pkgPwr = packageEnergy / sampleIntervalMs
-            }
-
-            if let aneEnergy = processor["ane_energy"] as? Double {
-                anePwr = aneEnergy / sampleIntervalMs
-            }
+            if let e = proc["cpu_energy"] as? Double { cpuPwr = e / sampleIntervalMs }
+            pkgPwr = ((proc["combined_power"] ?? proc["package_energy"]) as? Double ?? 0) / sampleIntervalMs
+            if let e = proc["ane_energy"] as? Double { anePwr = e / sampleIntervalMs }
         }
 
-        if let gpuData = plist["gpu"] as? [String: Any],
-           let idleRatio = gpuData["idle_ratio"] as? Double {
-            gpu = (1.0 - idleRatio) * 100.0
+        if let g = plist["gpu"] as? [String: Any] {
+            if let idle = g["idle_ratio"] as? Double { gpu = (1.0 - idle) * 100.0 }
+            if let e = g["gpu_energy"] as? Double { gpuPwr = e / sampleIntervalMs }
         }
-
-        if let gpuData = plist["gpu"] as? [String: Any],
-           let gpuEnergy = gpuData["gpu_energy"] as? Double {
-            gpuPwr = gpuEnergy / sampleIntervalMs
-        }
-
-        let aneUsageEst = anePwr > 0 ? min((anePwr / 8.0) * 100.0, 100.0) : 0
 
         DispatchQueue.main.async {
-            self.eCPUUsage = max(0, min(100, eCPU))
-            self.pCPUUsage = max(0, min(100, pCPU))
-            self.gpuUsage = max(0, min(100, gpu))
-            self.aneUsage = max(0, min(100, aneUsageEst))
-            self.anePower = max(0, anePwr)
-            self.cpuPower = max(0, cpuPwr)
-            self.gpuPower = max(0, gpuPwr)
-            self.packagePower = max(0, pkgPwr)
+            self.eCPUUsage = min(max(eCPU, 0), 100)
+            self.pCPUUsage = min(max(pCPU, 0), 100)
+            self.gpuUsage = min(max(gpu, 0), 100)
+            self.aneUsage = min(max(anePwr > 0 ? (anePwr / 8.0) * 100.0 : 0, 0), 100)
+            (self.anePower, self.cpuPower, self.gpuPower, self.packagePower) = (max(anePwr, 0), max(cpuPwr, 0), max(gpuPwr, 0), max(pkgPwr, 0))
         }
     }
 }

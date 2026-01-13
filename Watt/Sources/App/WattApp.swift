@@ -12,7 +12,7 @@ struct WattApp: App {
     }
 }
 
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     var statusItem: NSStatusItem?
     var popover: NSPopover?
     var powerMonitor: PowerMonitorService?
@@ -20,11 +20,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var cancellables = Set<AnyCancellable>()
     private var globalEventMonitor: Any?
     private var localEventMonitor: Any?
+    private var lastDisplayedPower: Double = -1
+    private var isAppVisible: Bool = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        powerMonitor = PowerMonitorService()
-        systemMetrics = SystemMetricsService()
-
+        (powerMonitor, systemMetrics) = (PowerMonitorService(), SystemMetricsService())
         setupMenuBar()
         setupPopover()
         setupRealtimeUpdates()
@@ -42,9 +42,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func setupRealtimeUpdates() {
-        // Update status bar when power monitor publishes changes (every 1s)
         powerMonitor?.objectWillChange
-            .receive(on: RunLoop.main)
+            .throttle(for: .seconds(2), scheduler: DispatchQueue.main, latest: true)
             .sink { [weak self] _ in
                 self?.updateStatusBarIcon()
             }
@@ -55,10 +54,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         popover = NSPopover()
         popover?.behavior = .transient
         popover?.animates = true
+        popover?.delegate = self
 
         let hostingController = NSHostingController(rootView: ContentView(powerMonitor: powerMonitor!, systemMetrics: systemMetrics!))
         hostingController.view.frame = NSRect(x: 0, y: 0, width: 320, height: 520)
         popover?.contentViewController = hostingController
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        onPopoverClosed()
     }
 
     private func setupEventMonitor() {
@@ -86,21 +90,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         if popover.isShown {
             popover.performClose(nil)
+            onPopoverClosed()
         } else {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             NSApp.activate(ignoringOtherApps: true)
+            onPopoverOpened()
         }
     }
 
-    private func updateStatusBarIcon() {
-        guard let button = statusItem?.button else { return }
+    private func onPopoverOpened() {
+        isAppVisible = true
+        (powerMonitor?.setAppVisible(true), systemMetrics?.setAppVisible(true))
+    }
 
-        let power = powerMonitor?.currentPower ?? 0
-        let powerText = String(format: "%.2fW", abs(power))
-        let textAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
-        ]
+    private func onPopoverClosed() {
+        isAppVisible = false
+        (powerMonitor?.setAppVisible(false), systemMetrics?.setAppVisible(false))
+    }
+
+    private func updateStatusBarIcon() {
+        guard let button = statusItem?.button, let power = powerMonitor?.currentPower, abs(power - lastDisplayedPower) >= 0.1 else { return }
+        lastDisplayedPower = power
         button.image = nil
-        button.attributedTitle = NSAttributedString(string: powerText, attributes: textAttrs)
+        button.attributedTitle = NSAttributedString(string: String(format: "%.2fW", abs(power)),
+                                                     attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)])
     }
 }

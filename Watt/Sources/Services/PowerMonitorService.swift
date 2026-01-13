@@ -78,21 +78,18 @@ private class SMCReader {
 
         let keyCode = fourCharCode(key)
 
-        // Get cached key info
         guard let keyInfo = getKeyInfo(keyCode), keyInfo.dataSize == 4 else { return nil }
 
-        // Read bytes
         var inp = SMCParamStruct()
         inp.key = keyCode
         inp.keyInfo.dataSize = keyInfo.dataSize
-        inp.data8 = 5  // kSMCReadKey
+        inp.data8 = 5
 
         var out = SMCParamStruct()
         var outSz = MemoryLayout<SMCParamStruct>.size
         guard IOConnectCallStructMethod(connection, 2, &inp, MemoryLayout<SMCParamStruct>.size, &out, &outSz) == kIOReturnSuccess,
               out.result == 0 else { return nil }
 
-        // Extract bytes and convert to little-endian float (inline for speed)
         let bytes = out.bytes
         let value: UInt32 = UInt32(bytes.0) | UInt32(bytes.1) << 8 | UInt32(bytes.2) << 16 | UInt32(bytes.3) << 24
         return Float(bitPattern: value)
@@ -101,8 +98,8 @@ private class SMCReader {
 
 struct DailyEnergyRecord: Codable, Identifiable {
     var id: String { date }
-    let date: String  // yyyy-MM-dd
-    var energyUsed: Double  // Wh
+    let date: String
+    var energyUsed: Double
 }
 
 class PowerMonitorService: ObservableObject {
@@ -112,24 +109,21 @@ class PowerMonitorService: ObservableObject {
     @Published var portInfo: PortInfo?
     @Published var energyHistory: [EnergyReading] = []
 
-    // Power values - use internal storage with change threshold to reduce UI updates
     @Published private(set) var currentPower: Double = 0
     @Published private(set) var wallPower: Double = 0
     @Published private(set) var batteryPower: Double = 0
     @Published private(set) var systemPower: Double = 0
-    private let powerChangeThreshold: Double = 0.05  // Only update UI if change > 0.05W
-    @Published var lifetimeEnergyUsed: Double = 0  // Wh
+    private let powerChangeThreshold: Double = 0.2
+    @Published var lifetimeEnergyUsed: Double = 0
     @Published var lifetimeSessionCount: Int = 0
-    @Published var todayEnergyUsed: Double = 0  // Wh
-    @Published var dailyHistory: [DailyEnergyRecord] = []  // Historical daily records
-    @Published var batteryRatePerMinute: Double = 0  // %/min (positive = charging, negative = discharging)
+    @Published var todayEnergyUsed: Double = 0
+    @Published var dailyHistory: [DailyEnergyRecord] = []
+    @Published var batteryRatePerMinute: Double = 0
 
-    // Electricity cost tracking
-    @Published var electricityCostPerKwh: Double = 0.12  // $/kWh (default US average)
+    @Published var electricityCostPerKwh: Double = 0.12
     @Published var autoFindElectricityCost: Bool = false
     @Published var zipCode: String = ""
 
-    // Lifetime cost is computed from energy to ensure consistency
     var lifetimeCost: Double {
         return (lifetimeEnergyUsed / 1000.0) * electricityCostPerKwh
     }
@@ -139,22 +133,25 @@ class PowerMonitorService: ObservableObject {
     private var lastPowerReading: Double = 0
     private let smcReader = SMCReader()
     private var currentDateString: String = ""
-
-    // UserDefaults keys
-    private let lifetimeEnergyKey = "com.watt.lifetimeEnergy"
-    private let lifetimeSessionsKey = "com.watt.lifetimeSessions"
-    private let todayEnergyKey = "com.watt.todayEnergy"
-    private let todayDateKey = "com.watt.todayDate"
-    private let dailyHistoryKey = "com.watt.dailyHistory"
-    private let electricityCostKey = "com.watt.electricityCost"
-    private let autoFindCostKey = "com.watt.autoFindCost"
-    private let zipCodeKey = "com.watt.zipCode"
+    private var isAppVisible: Bool = false
+    private let timerQueue = DispatchQueue(label: "com.watt.powermonitor", qos: .utility)
     private var saveTimer: DispatchSourceTimer?
+
+    private enum Keys {
+        static let lifetimeEnergy = "com.watt.lifetimeEnergy"
+        static let lifetimeSessions = "com.watt.lifetimeSessions"
+        static let todayEnergy = "com.watt.todayEnergy"
+        static let todayDate = "com.watt.todayDate"
+        static let dailyHistory = "com.watt.dailyHistory"
+        static let electricityCost = "com.watt.electricityCost"
+        static let autoFindCost = "com.watt.autoFindCost"
+        static let zipCode = "com.watt.zipCode"
+    }
 
     init() {
         lastReadingTime = Date()
         loadLifetimeStats()
-        incrementSessionCount()
+        lifetimeSessionCount += 1
         startMonitoring()
         startPeriodicSave()
     }
@@ -167,14 +164,7 @@ class PowerMonitorService: ObservableObject {
 
     func startMonitoring() {
         updateAllReadings()
-
-        let queue = DispatchQueue(label: "com.watt.powermonitor", qos: .userInteractive)
-        timer = DispatchSource.makeTimerSource(queue: queue)
-        timer?.schedule(deadline: .now(), repeating: .milliseconds(1000))
-        timer?.setEventHandler { [weak self] in
-            self?.updateAllReadings()
-        }
-        timer?.resume()
+        restartTimerWithCurrentInterval()
     }
 
     func stopMonitoring() {
@@ -182,54 +172,60 @@ class PowerMonitorService: ObservableObject {
         timer = nil
     }
 
+    func setAppVisible(_ visible: Bool) {
+        isAppVisible = visible
+        restartTimerWithCurrentInterval()
+    }
+
+    private func restartTimerWithCurrentInterval() {
+        timer?.cancel()
+        timer = DispatchSource.makeTimerSource(queue: timerQueue)
+
+        let interval: DispatchTimeInterval = isAppVisible ? .seconds(1) : .seconds(3)
+        let leeway: DispatchTimeInterval = isAppVisible ? .milliseconds(100) : .milliseconds(500)
+
+        timer?.schedule(deadline: .now(), repeating: interval, leeway: leeway)
+        timer?.setEventHandler { [weak self] in
+            self?.updateAllReadings()
+        }
+        timer?.resume()
+    }
+
     private func loadLifetimeStats() {
-        lifetimeEnergyUsed = UserDefaults.standard.double(forKey: lifetimeEnergyKey)
-        lifetimeSessionCount = UserDefaults.standard.integer(forKey: lifetimeSessionsKey)
+        let defaults = UserDefaults.standard
+        lifetimeEnergyUsed = defaults.double(forKey: Keys.lifetimeEnergy)
+        lifetimeSessionCount = defaults.integer(forKey: Keys.lifetimeSessions)
+        electricityCostPerKwh = max(0.01, defaults.double(forKey: Keys.electricityCost))
+        if electricityCostPerKwh == 0.01 { electricityCostPerKwh = 0.12 }
+        autoFindElectricityCost = defaults.bool(forKey: Keys.autoFindCost)
+        zipCode = defaults.string(forKey: Keys.zipCode) ?? ""
+        dailyHistory = (try? JSONDecoder().decode([DailyEnergyRecord].self, from: defaults.data(forKey: Keys.dailyHistory) ?? Data())) ?? []
 
-        let savedCost = UserDefaults.standard.double(forKey: electricityCostKey)
-        if savedCost > 0 {
-            electricityCostPerKwh = savedCost
-        }
-        autoFindElectricityCost = UserDefaults.standard.bool(forKey: autoFindCostKey)
-        zipCode = UserDefaults.standard.string(forKey: zipCodeKey) ?? ""
-
-        if let data = UserDefaults.standard.data(forKey: dailyHistoryKey),
-           let history = try? JSONDecoder().decode([DailyEnergyRecord].self, from: data) {
-            dailyHistory = history
-        }
-
-        let savedDate = UserDefaults.standard.string(forKey: todayDateKey) ?? ""
         currentDateString = todayDateString()
+        let savedDate = defaults.string(forKey: Keys.todayDate) ?? ""
 
         if savedDate == currentDateString {
-            todayEnergyUsed = UserDefaults.standard.double(forKey: todayEnergyKey)
-        } else {
-            if !savedDate.isEmpty {
-                let previousEnergy = UserDefaults.standard.double(forKey: todayEnergyKey)
-                if previousEnergy > 0 {
-                    archiveDay(date: savedDate, energy: previousEnergy)
-                }
-            }
+            todayEnergyUsed = defaults.double(forKey: Keys.todayEnergy)
+        } else if !savedDate.isEmpty, defaults.double(forKey: Keys.todayEnergy) > 0 {
+            archiveDay(date: savedDate, energy: defaults.double(forKey: Keys.todayEnergy))
             todayEnergyUsed = 0
-            UserDefaults.standard.set(currentDateString, forKey: todayDateKey)
+            defaults.set(currentDateString, forKey: Keys.todayDate)
         }
 
-        if autoFindElectricityCost {
-            fetchElectricityCost()
-        }
+        if autoFindElectricityCost { fetchElectricityCost() }
     }
 
     private func saveLifetimeStats() {
-        UserDefaults.standard.set(lifetimeEnergyUsed, forKey: lifetimeEnergyKey)
-        UserDefaults.standard.set(lifetimeSessionCount, forKey: lifetimeSessionsKey)
-        UserDefaults.standard.set(todayEnergyUsed, forKey: todayEnergyKey)
-        UserDefaults.standard.set(currentDateString, forKey: todayDateKey)
-        UserDefaults.standard.set(electricityCostPerKwh, forKey: electricityCostKey)
-        UserDefaults.standard.set(autoFindElectricityCost, forKey: autoFindCostKey)
-        UserDefaults.standard.set(zipCode, forKey: zipCodeKey)
-
+        let defaults = UserDefaults.standard
+        defaults.set(lifetimeEnergyUsed, forKey: Keys.lifetimeEnergy)
+        defaults.set(lifetimeSessionCount, forKey: Keys.lifetimeSessions)
+        defaults.set(todayEnergyUsed, forKey: Keys.todayEnergy)
+        defaults.set(currentDateString, forKey: Keys.todayDate)
+        defaults.set(electricityCostPerKwh, forKey: Keys.electricityCost)
+        defaults.set(autoFindElectricityCost, forKey: Keys.autoFindCost)
+        defaults.set(zipCode, forKey: Keys.zipCode)
         if let data = try? JSONEncoder().encode(dailyHistory) {
-            UserDefaults.standard.set(data, forKey: dailyHistoryKey)
+            defaults.set(data, forKey: Keys.dailyHistory)
         }
     }
 
@@ -237,7 +233,6 @@ class PowerMonitorService: ObservableObject {
         DispatchQueue.main.async {
             self.electricityCostPerKwh = cost
             self.autoFindElectricityCost = false
-            self.objectWillChange.send()
             self.saveLifetimeStats()
         }
     }
@@ -246,9 +241,7 @@ class PowerMonitorService: ObservableObject {
         DispatchQueue.main.async {
             self.autoFindElectricityCost = enabled
             self.saveLifetimeStats()
-            if enabled {
-                self.fetchElectricityCost()
-            }
+            if enabled { self.fetchElectricityCost() }
         }
     }
 
@@ -256,24 +249,18 @@ class PowerMonitorService: ObservableObject {
         DispatchQueue.main.async {
             self.zipCode = zip
             if let state = self.getStateFromZipCode(zip) {
-                let rate = self.getStateElectricityRate(state: state)
-                self.electricityCostPerKwh = rate
+                self.electricityCostPerKwh = self.getStateElectricityRate(state: state)
                 self.autoFindElectricityCost = false
             }
-            self.objectWillChange.send()
             self.saveLifetimeStats()
         }
     }
 
     func resetAllStatistics() {
         DispatchQueue.main.async {
-            self.lifetimeEnergyUsed = 0
-            self.lifetimeSessionCount = 0
-            self.todayEnergyUsed = 0
-            self.dailyHistory = []
-            self.energyHistory = []
+            (self.lifetimeEnergyUsed, self.lifetimeSessionCount, self.todayEnergyUsed) = (0, 0, 0)
+            (self.dailyHistory, self.energyHistory) = ([], [])
             self.currentDateString = self.todayDateString()
-            self.objectWillChange.send()
             self.saveLifetimeStats()
         }
     }
@@ -325,20 +312,20 @@ class PowerMonitorService: ObservableObject {
     }
 
     private func getStateElectricityRate(state: String) -> Double {
-        let rates: [String: Double] = [
-            "AL": 0.12, "AK": 0.22, "AZ": 0.11, "AR": 0.10, "CA": 0.23,
-            "CO": 0.12, "CT": 0.21, "DE": 0.13, "FL": 0.12, "GA": 0.12,
-            "HI": 0.33, "ID": 0.10, "IL": 0.13, "IN": 0.13, "IA": 0.12,
-            "KS": 0.12, "KY": 0.11, "LA": 0.10, "ME": 0.17, "MD": 0.13,
-            "MA": 0.22, "MI": 0.16, "MN": 0.13, "MS": 0.11, "MO": 0.11,
-            "MT": 0.11, "NE": 0.10, "NV": 0.12, "NH": 0.19, "NJ": 0.16,
-            "NM": 0.12, "NY": 0.19, "NC": 0.11, "ND": 0.10, "OH": 0.12,
-            "OK": 0.10, "OR": 0.11, "PA": 0.14, "RI": 0.21, "SC": 0.12,
-            "SD": 0.11, "TN": 0.11, "TX": 0.12, "UT": 0.10, "VT": 0.17,
-            "VA": 0.12, "WA": 0.10, "WV": 0.12, "WI": 0.14, "WY": 0.11,
-            "DC": 0.13
-        ]
-        return rates[state] ?? 0.12
+        switch state {
+        case "HI": return 0.33
+        case "AK": return 0.22
+        case "CA", "MA": return 0.22
+        case "CT", "RI": return 0.21
+        case "NH", "NY": return 0.19
+        case "ME", "VT": return 0.17
+        case "MI", "NJ": return 0.16
+        case "PA", "WI": return 0.14
+        case "DE", "IL", "IN", "MD", "MN", "DC": return 0.13
+        case "AZ", "KY", "MS", "MO", "MT", "NC", "SD", "TN", "WY": return 0.11
+        case "AR", "ID", "LA", "NE", "ND", "OK", "UT", "WA": return 0.10
+        default: return 0.12
+        }
     }
 
     private func archiveDay(date: String, energy: Double) {
@@ -346,40 +333,28 @@ class PowerMonitorService: ObservableObject {
             dailyHistory[index].energyUsed = energy
         } else {
             dailyHistory.append(DailyEnergyRecord(date: date, energyUsed: energy))
-        }
-        if dailyHistory.count > 365 {
-            dailyHistory.removeFirst(dailyHistory.count - 365)
+            if dailyHistory.count > 90 { dailyHistory.removeFirst(dailyHistory.count - 90) }
         }
     }
 
     private func todayDateString() -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: Date())
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; return f.string(from: Date())
     }
 
     private func checkDayChange() {
         let now = todayDateString()
-        if now != currentDateString {
-            if todayEnergyUsed > 0 {
-                archiveDay(date: currentDateString, energy: todayEnergyUsed)
-            }
-            todayEnergyUsed = 0
-            currentDateString = now
-            UserDefaults.standard.set(currentDateString, forKey: todayDateKey)
-            saveLifetimeStats()
-        }
-    }
-
-    private func incrementSessionCount() {
-        lifetimeSessionCount += 1
+        guard now != currentDateString else { return }
+        if todayEnergyUsed > 0 { archiveDay(date: currentDateString, energy: todayEnergyUsed) }
+        todayEnergyUsed = 0
+        currentDateString = now
+        UserDefaults.standard.set(now, forKey: Keys.todayDate)
         saveLifetimeStats()
     }
 
     private func startPeriodicSave() {
         let queue = DispatchQueue(label: "com.watt.save", qos: .utility)
         saveTimer = DispatchSource.makeTimerSource(queue: queue)
-        saveTimer?.schedule(deadline: .now() + 30, repeating: .seconds(30))
+        saveTimer?.schedule(deadline: .now() + 60, repeating: .seconds(60), leeway: .seconds(10))
         saveTimer?.setEventHandler { [weak self] in
             self?.saveLifetimeStats()
         }
@@ -404,7 +379,6 @@ class PowerMonitorService: ObservableObject {
             self.powerTelemetry = telemetry
             self.portInfo = port
 
-            // Only update power values if they changed significantly
             let newSystemPower = Double(smcSystem)
             let newBatteryPower = Double(smcBattery)
             if abs(newSystemPower - self.systemPower) > self.powerChangeThreshold {
@@ -414,39 +388,29 @@ class PowerMonitorService: ObservableObject {
                 self.batteryPower = newBatteryPower
             }
 
-            // Compute wall power from system + charging for better sync
-            // batteryPower is positive when discharging, negative when charging
             var newWallPower: Double
             if self.batteryPower < 0 {
-                // Charging: wall supplies system + battery charging
                 newWallPower = self.systemPower + abs(self.batteryPower)
             } else if battery?.isPluggedIn == true {
-                // Plugged in but not charging (or discharging to supplement)
                 newWallPower = max(0, self.systemPower - self.batteryPower)
             } else {
-                // On battery
                 newWallPower = 0
             }
 
-            // If computed wall power seems off, fall back to SMC reading
             if newWallPower <= 0 && smcWall > 0 && battery?.isPluggedIn == true {
                 newWallPower = Double(smcWall)
             }
 
-            // Only update if changed significantly
             if abs(newWallPower - self.wallPower) > self.powerChangeThreshold {
                 self.wallPower = newWallPower
             }
 
-            // currentPower = system power (compute usage only, excludes charging)
-            // Priority: SMC system > telemetry system > battery discharge > computed from V*A
             var newCurrentPower: Double = 0
             if self.systemPower > 0 {
                 newCurrentPower = self.systemPower
             } else if let telemetry = telemetry, telemetry.systemPower > 0 {
                 newCurrentPower = telemetry.systemPower
             } else if self.batteryPower > 0 {
-                // On battery: battery discharge = system consumption
                 newCurrentPower = self.batteryPower
             } else if let telemetry = telemetry, telemetry.batteryPower > 0 {
                 newCurrentPower = telemetry.batteryPower
@@ -454,7 +418,6 @@ class PowerMonitorService: ObservableObject {
                 newCurrentPower = battery.powerUsage
             }
 
-            // Only update if changed significantly
             if abs(newCurrentPower - self.currentPower) > self.powerChangeThreshold {
                 self.currentPower = newCurrentPower
             }
@@ -469,9 +432,6 @@ class PowerMonitorService: ObservableObject {
 
         checkDayChange()
 
-        // Track system power consumption using trapezoidal integration
-        // Energy = (P1 + P2) / 2 × Δt - more accurate than simple P × t
-        // This excludes battery charging - going 0→100% doesn't inflate stats
         if currentPower > 0 || lastPowerReading > 0 {
             let avgPower = (currentPower + lastPowerReading) / 2.0
             if avgPower > 0 {
@@ -483,7 +443,7 @@ class PowerMonitorService: ObservableObject {
 
         let reading = EnergyReading(timestamp: now, power: currentPower)
         energyHistory.append(reading)
-        if energyHistory.count > 60 {
+        if energyHistory.count > 30 {
             energyHistory.removeFirst()
         }
 
@@ -499,17 +459,13 @@ class PowerMonitorService: ObservableObject {
             return
         }
 
-        // Use consistent nominal voltage (mAh × V / 1000 = Wh)
         let maxCapacityWh = Double(battery.maxCapacity) * battery.nominalVoltage / 1000.0
         guard maxCapacityWh > 0 else {
             batteryRatePerMinute = 0
             return
         }
 
-        // chargingPower: positive = charging, negative = discharging
-        // batteryPower from SMC: positive = discharging, negative = charging
         let chargingPower = -batteryPower
-        // Rate = (Power / Capacity) × 100% / 60min = %/min
         batteryRatePerMinute = (chargingPower / maxCapacityWh) * 100.0 / 60.0
     }
 
@@ -759,8 +715,6 @@ class PowerMonitorService: ObservableObject {
     }
 
     var costPerHour: Double {
-        // Cost based on system power consumption (compute usage)
-        // Returns dollars per hour (consistent with todayCost, lifetimeCost)
         guard currentPower > 0 else { return 0 }
         return (currentPower / 1000.0) * electricityCostPerKwh
     }

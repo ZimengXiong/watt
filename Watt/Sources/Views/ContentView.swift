@@ -1,19 +1,8 @@
 import SwiftUI
 import ServiceManagement
 
-private func batteryColor(for level: Int) -> Color {
-    if level <= 20 { return .red }
-    if level <= 40 { return .orange }
-    return .green
-}
-
-private func batteryIcon(for level: Int) -> String {
-    if level <= 10 { return "battery.0" }
-    if level <= 25 { return "battery.25" }
-    if level <= 50 { return "battery.50" }
-    if level <= 75 { return "battery.75" }
-    return "battery.100"
-}
+private func batteryColor(for level: Int) -> Color { level <= 20 ? .red : level <= 40 ? .orange : .green }
+private func batteryIcon(for level: Int) -> String { level <= 10 ? "battery.0" : level <= 25 ? "battery.25" : level <= 50 ? "battery.50" : level <= 75 ? "battery.75" : "battery.100" }
 
 struct ContentView: View {
     @ObservedObject var powerMonitor: PowerMonitorService
@@ -92,25 +81,12 @@ struct HeroHeaderView: View {
         }
     }
 
-    private var statusText: String {
-        if powerMonitor.batteryInfo?.isCharging == true { return "Charging" }
-        if powerMonitor.batteryInfo?.isPluggedIn == true { return "Plugged In" }
-        return "On Battery"
-    }
-
-    private var statusColor: Color {
-        if powerMonitor.batteryInfo?.isCharging == true { return .green }
-        if powerMonitor.batteryInfo?.isPluggedIn == true { return .blue }
-        return .orange
-    }
-
+    private var statusText: String { powerMonitor.batteryInfo?.isCharging == true ? "Charging" : powerMonitor.batteryInfo?.isPluggedIn == true ? "Plugged In" : "On Battery" }
+    private var statusColor: Color { powerMonitor.batteryInfo?.isCharging == true ? .green : powerMonitor.batteryInfo?.isPluggedIn == true ? .blue : .orange }
     private var timeText: String? {
-        guard let battery = powerMonitor.batteryInfo else { return nil }
-        if battery.isCharging {
-            return battery.formattedTimeToFull == "--" ? nil : "\(battery.formattedTimeToFull) to full"
-        } else if !battery.isPluggedIn {
-            return battery.formattedTimeRemaining == "--" ? nil : "\(battery.formattedTimeRemaining) left"
-        }
+        guard let b = powerMonitor.batteryInfo else { return nil }
+        if b.isCharging { return b.formattedTimeToFull == "--" ? nil : "\(b.formattedTimeToFull) to full" }
+        if !b.isPluggedIn { return b.formattedTimeRemaining == "--" ? nil : "\(b.formattedTimeRemaining) left" }
         return "Fully Charged"
     }
 }
@@ -168,18 +144,9 @@ struct BatterySection: View {
         }
     }
 
-    private func usbcPDSpecs(watts: Int) -> (voltage: Double, current: Double) {
-        // USB-PD SPR: 5V, 9V, 15V, 20V (up to 100W)
-        // USB-PD 3.1 EPR: 28V, 36V, 48V (up to 240W)
-        switch watts {
-        case ...15: return (5, Double(watts) / 5.0)
-        case ...27: return (9, Double(watts) / 9.0)
-        case ...45: return (15, Double(watts) / 15.0)
-        case ...100: return (20, Double(watts) / 20.0)
-        case ...140: return (28, Double(watts) / 28.0)
-        case ...180: return (36, Double(watts) / 36.0)
-        default: return (48, Double(watts) / 48.0)
-        }
+    private func usbcPDSpecs(watts: Int) -> (Double, Double) {
+        let v: Double = watts <= 15 ? 5 : watts <= 27 ? 9 : watts <= 45 ? 15 : watts <= 100 ? 20 : watts <= 140 ? 28 : watts <= 180 ? 36 : 48
+        return (v, Double(watts) / v)
     }
 }
 
@@ -192,9 +159,9 @@ enum BatteryDisplayMode: CaseIterable {
 struct BatteryIconView: View {
     let percentage: Int
     let voltage: Double
-    let currentCapacityRaw: Int  // mAh
-    let maxCapacity: Int         // mAh
-    let nominalVoltage: Double   // V
+    let currentCapacityRaw: Int
+    let maxCapacity: Int
+    let nominalVoltage: Double
     let color: Color
 
     @State private var displayMode: BatteryDisplayMode = .percentage
@@ -203,13 +170,8 @@ struct BatteryIconView: View {
     private let batteryWidth: CGFloat = 72
     private let batteryHeight: CGFloat = 36
 
-    private var currentWh: Double {
-        Double(currentCapacityRaw) * nominalVoltage / 1000.0
-    }
-
-    private var maxWh: Double {
-        Double(maxCapacity) * nominalVoltage / 1000.0
-    }
+    private var currentWh: Double { Double(currentCapacityRaw) * nominalVoltage / 1000.0 }
+    private var maxWh: Double { Double(maxCapacity) * nominalVoltage / 1000.0 }
 
     var body: some View {
         ZStack(alignment: .leading) {
@@ -491,17 +453,8 @@ struct HistorySection: View {
         }
     }
 
-    private func formatEnergy(_ wh: Double) -> String {
-        if wh >= 1000 {
-            return String(format: "%.1f kWh", wh / 1000)
-        }
-        return String(format: "%.0f Wh", wh)
-    }
-
-    private func formatBatteryRate(_ rate: Double) -> String {
-        let sign = rate >= 0 ? "+" : ""
-        return String(format: "%@%.2f%%/m", sign, rate)
-    }
+    private func formatEnergy(_ wh: Double) -> String { wh >= 1000 ? String(format: "%.1f kWh", wh / 1000) : String(format: "%.0f Wh", wh) }
+    private func formatBatteryRate(_ rate: Double) -> String { String(format: "%@%.2f%%/m", rate >= 0 ? "+" : "", rate) }
 }
 
 struct StatColumn: View {
@@ -527,22 +480,10 @@ struct StatColumn: View {
 struct PowerGraph: View {
     let readings: [EnergyReading]
 
-    // Pre-compute values to avoid repeated calculations
-    private var powerValues: [Double] {
-        readings.map { $0.power }
-    }
-
-    private var maxP: Double {
-        max(powerValues.max() ?? 1, 1)
-    }
-
-    private var minP: Double {
-        max(0, (powerValues.min() ?? 0) * 0.8)
-    }
-
-    private var range: Double {
-        max(maxP - minP, 0.1)
-    }
+    private var powerValues: [Double] { readings.map { $0.power } }
+    private var maxP: Double { max(powerValues.max() ?? 1, 1) }
+    private var minP: Double { max(0, (powerValues.min() ?? 0) * 0.8) }
+    private var range: Double { max(maxP - minP, 0.1) }
 
     var body: some View {
         GeometryReader { geo in
@@ -551,7 +492,6 @@ struct PowerGraph: View {
 
                 let step = size.width / CGFloat(readings.count - 1)
 
-                // Build fill path
                 var fillPath = Path()
                 fillPath.move(to: CGPoint(x: 0, y: size.height))
                 for (i, power) in powerValues.enumerated() {
@@ -562,7 +502,6 @@ struct PowerGraph: View {
                 fillPath.addLine(to: CGPoint(x: size.width, y: size.height))
                 fillPath.closeSubpath()
 
-                // Build stroke path
                 var strokePath = Path()
                 for (i, power) in powerValues.enumerated() {
                     let x = CGFloat(i) * step
@@ -571,7 +510,6 @@ struct PowerGraph: View {
                     else { strokePath.addLine(to: CGPoint(x: x, y: y)) }
                 }
 
-                // Draw fill
                 context.fill(
                     fillPath,
                     with: .linearGradient(
@@ -581,7 +519,6 @@ struct PowerGraph: View {
                     )
                 )
 
-                // Draw stroke
                 context.stroke(
                     strokePath,
                     with: .color(.accentColor),

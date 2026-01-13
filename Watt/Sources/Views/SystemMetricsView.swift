@@ -131,11 +131,7 @@ struct MemoryBarView: View {
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 
-    private var memoryColor: Color {
-        if memory.usagePercent > 90 { return .red }
-        if memory.usagePercent > 70 { return .orange }
-        return .green
-    }
+    private var memoryColor: Color { memory.usagePercent > 90 ? .red : memory.usagePercent > 70 ? .orange : .green }
 }
 
 // MARK: - Usage Bar Graph (htop-style) - Optimized with Canvas
@@ -156,14 +152,12 @@ struct UsageBarGraph: View {
             for index in 0..<barCount {
                 let x = CGFloat(index) * (barWidth + spacing)
 
-                // Background bar
                 let bgRect = CGRect(x: x, y: 0, width: barWidth, height: size.height)
                 context.fill(
                     RoundedRectangle(cornerRadius: 1).path(in: bgRect),
                     with: .color(Color.primary.opacity(0.08))
                 )
 
-                // Fill bar
                 let barIndex = Double(index)
                 let fillPercent: Double
                 if barIndex < filledBars - 1 {
