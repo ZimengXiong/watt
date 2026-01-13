@@ -284,7 +284,7 @@ do shell script "\(uninstallCmd)" with administrator privileges with prompt "\(u
                 for c in clusters {
                     guard let name = c["name"] as? String, let idle = c["idle_ratio"] as? Double else { continue }
                     let usage = (1.0 - idle) * 100.0
-                    (name.hasPrefix("E") ? &eUsages : &pUsages).append(usage)
+                    if name.hasPrefix("E") { eUsages.append(usage) } else { pUsages.append(usage) }
                 }
                 if !eUsages.isEmpty { eCPU = eUsages.reduce(0, +) / Double(eUsages.count) }
                 if !pUsages.isEmpty { pCPU = pUsages.reduce(0, +) / Double(pUsages.count) }

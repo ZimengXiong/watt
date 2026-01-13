@@ -100,12 +100,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     private func onPopoverOpened() {
         isAppVisible = true
-        (powerMonitor?.setAppVisible(true), systemMetrics?.setAppVisible(true))
+        powerMonitor?.setAppVisible(true)
+        systemMetrics?.setAppVisible(true)
     }
 
     private func onPopoverClosed() {
         isAppVisible = false
-        (powerMonitor?.setAppVisible(false), systemMetrics?.setAppVisible(false))
+        powerMonitor?.setAppVisible(false)
+        systemMetrics?.setAppVisible(false)
     }
 
     private func updateStatusBarIcon() {
