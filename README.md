@@ -6,6 +6,7 @@ Monitor power consumption, cost, and core usage.
   <img src="Screenshots/main.png" alt="Watt" height="700">
 </p>
 
+
 ## Installation
 
 ### Homebrew

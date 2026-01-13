@@ -50,8 +50,8 @@ release: setup
 		echo "Version: $$VERSION" && \
 		echo "SHA256: $$SHA" && \
 		echo "Creating git tag v$$VERSION..." && \
-		git tag -a "v$$VERSION" -m "Release v$$VERSION" && \
-		git push origin "v$$VERSION" && \
+		git tag -a "v$$VERSION" -m "Release v$$VERSION" -f && \
+		git push origin "v$$VERSION" -f && \
 		echo "Creating GitHub release v$$VERSION..." && \
 		gh release create "v$$VERSION" $(BUILD_DIR)/release/$(PROJECT_NAME).app.zip \
 			--title "Watt v$$VERSION" \
@@ -63,7 +63,7 @@ release: setup
 		cd homebrew && \
 		git add Casks/watt.rb && \
 		git commit -m "Update to v$$VERSION" && \
-		git push && \
+		git push -f && \
 		echo "Pushed homebrew update to remote"
 
 run: build
