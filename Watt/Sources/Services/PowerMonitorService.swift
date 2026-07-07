@@ -469,6 +469,17 @@ class PowerMonitorService: ObservableObject {
         batteryRatePerMinute = (chargingPower / maxCapacityWh) * 100.0 / 60.0
     }
 
+    /// Battery temperature from the SMC (°C). Apple Silicon doesn't publish it
+    /// in the AppleSmartBattery IORegistry, so read the "TB?T" thermal keys.
+    private func readBatteryTemperature() -> Double? {
+        for key in ["TB0T", "TB1T", "TB2T"] {
+            if let value = smcReader.readFloat(key), value > 0, value < 80 {
+                return Double(value)
+            }
+        }
+        return nil
+    }
+
     private func readBatteryInfo() -> BatteryInfo? {
         var info = BatteryInfo()
 
@@ -507,16 +518,26 @@ class PowerMonitorService: ObservableObject {
             info.amperage = Double(amperage)
         }
 
+        // On Apple Silicon the raw capacity/design values are nested inside
+        // "BatteryData" rather than exposed at the top level.
+        let batteryData = properties["BatteryData"] as? [String: Any]
+
         if let current = properties["CurrentCapacity"] as? Int {
             info.currentCapacity = current
         }
         if let currentRaw = properties["AppleRawCurrentCapacity"] as? Int {
             info.currentCapacityRaw = currentRaw
+        } else if let remaining = batteryData?["RemainingCapacity"] as? Int {
+            info.currentCapacityRaw = remaining
         }
         if let max = properties["AppleRawMaxCapacity"] as? Int {
             info.maxCapacity = max
+        } else if let full = batteryData?["FullChargeCapacity"] as? Int {
+            info.maxCapacity = full
         }
         if let design = properties["DesignCapacity"] as? Int {
+            info.designCapacity = design
+        } else if let design = batteryData?["DesignCapacity"] as? Int {
             info.designCapacity = design
         }
 
@@ -526,6 +547,9 @@ class PowerMonitorService: ObservableObject {
 
         if let temp = properties["Temperature"] as? Int {
             info.temperature = (Double(temp) / 10.0) - 273.15
+        } else if let smcTemp = readBatteryTemperature() {
+            // Apple Silicon doesn't expose battery temp in IORegistry; read the SMC.
+            info.temperature = smcTemp
         }
 
         if let charging = properties["IsCharging"] as? Bool {

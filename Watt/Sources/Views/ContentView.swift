@@ -4,39 +4,136 @@ import ServiceManagement
 private func batteryColor(for level: Int) -> Color { level <= 20 ? .red : level <= 40 ? .orange : .green }
 private func batteryIcon(for level: Int) -> String { level <= 10 ? "battery.0" : level <= 25 ? "battery.25" : level <= 50 ? "battery.50" : level <= 75 ? "battery.75" : "battery.100" }
 
+// MARK: - Liquid Glass helpers (macOS 26+), with graceful fallback
+
+extension View {
+    /// Applies a Liquid Glass material clipped to `shape` on macOS 26+,
+    /// falling back to a translucent material + hairline on older systems.
+    @ViewBuilder
+    func glassCard<S: Shape>(_ shape: S) -> some View {
+        if #available(macOS 26.0, *) {
+            self.glassEffect(.regular, in: shape)
+        } else {
+            self
+                .background(Color.primary.opacity(0.035))
+                .clipShape(shape)
+                .overlay(shape.stroke(Color.primary.opacity(0.06), lineWidth: 0.5))
+        }
+    }
+
+    /// A circular glass control on macOS 26+, falling back to the custom footer style.
+    @ViewBuilder
+    func glassControl() -> some View {
+        if #available(macOS 26.0, *) {
+            self.buttonStyle(.glass).buttonBorderShape(.circle)
+        } else {
+            self.buttonStyle(FooterButtonStyle())
+        }
+    }
+}
+
 struct ContentView: View {
     @ObservedObject var powerMonitor: PowerMonitorService
     @ObservedObject var systemMetrics: SystemMetricsService
     @Environment(\.colorScheme) var colorScheme
+    @State private var route: PanelRoute = .main
 
     var body: some View {
-        ZStack {
-            VisualEffectView(material: .popover, blendingMode: .behindWindow)
+        panel
+            .frame(width: 288)
+            .fixedSize()
+    }
+
+    @ViewBuilder
+    private var panel: some View {
+        if #available(macOS 26.0, *) {
+            GlassEffectContainer {
+                routedContent
+            }
+        } else {
+            routedContent
+        }
+    }
+
+    @ViewBuilder
+    private var routedContent: some View {
+        ZStack(alignment: .top) {
+            panelBackground
                 .ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                HeroHeaderView(powerMonitor: powerMonitor)
-
-                ScrollView(.vertical, showsIndicators: false) {
-                    VStack(spacing: 10) {
-                        SystemMetricsSection(metricsService: systemMetrics)
-                        PowerFlowSection(powerMonitor: powerMonitor)
-                        BatterySection(powerMonitor: powerMonitor)
-                        HistorySection(powerMonitor: powerMonitor)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 4)
-                    .padding(.bottom, 12)
+            Group {
+                switch route {
+                case .main:
+                    mainPanel
+                        .transition(.opacity)
+                case .settings:
+                    SettingsView(powerMonitor: powerMonitor, onBack: { goMain() })
+                        .transition(.opacity)
+                case .about:
+                    AboutView(onBack: { goMain() })
+                        .transition(.opacity)
                 }
-
-                Divider()
-                    .opacity(0.3)
-
-                AppFooterView(powerMonitor: powerMonitor)
             }
         }
-        .frame(width: 320)
-        .fixedSize()
+        .animation(.easeInOut(duration: 0.22), value: route)
+    }
+
+    private func goMain() { route = .main }
+
+    /// The whole-panel backing: the standard legible menu material (as native menus use),
+    /// so text stays readable. Liquid Glass is reserved for the cards and control chips.
+    private var panelBackground: some View {
+        VisualEffectView(material: .menu, blendingMode: .behindWindow)
+    }
+
+    private var mainPanel: some View {
+        VStack(spacing: 0) {
+            HeroHeaderView(powerMonitor: powerMonitor)
+
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(spacing: 6) {
+                    SystemMetricsSection(metricsService: systemMetrics)
+                    PowerFlowSection(powerMonitor: powerMonitor)
+                    BatterySection(powerMonitor: powerMonitor)
+                    HistorySection(powerMonitor: powerMonitor)
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, 2)
+                .padding(.bottom, 2)
+            }
+
+            AppFooterView(powerMonitor: powerMonitor, route: $route)
+        }
+    }
+}
+
+enum PanelRoute {
+    case main, settings, about
+}
+
+// MARK: - Inline panel header with a back control
+
+struct InlinePanelHeader: View {
+    let title: String
+    let onBack: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(action: onBack) {
+                Image(systemName: "chevron.backward")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 20, height: 20)
+            }
+            .glassControl()
+
+            Text(title)
+                .font(.system(size: 15, weight: .semibold))
+
+            Spacer()
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 14)
+        .padding(.bottom, 10)
     }
 }
 
@@ -46,43 +143,29 @@ struct HeroHeaderView: View {
     @ObservedObject var powerMonitor: PowerMonitorService
 
     var body: some View {
-        VStack(spacing: 2) {
-            HStack(alignment: .center) {
-                HStack(spacing: 4) {
-                    Circle()
-                        .fill(statusColor)
-                        .frame(width: 6, height: 6)
-                    Text(statusText)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                if let time = timeText {
-                    Text(time)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
-
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
+        VStack(spacing: 1) {
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
                 Text(String(format: "%.1f", powerMonitor.currentPower))
-                    .font(.system(size: 42, weight: .medium, design: .rounded))
+                    .font(.system(size: 44, weight: .regular))
                     .monospacedDigit()
                     .foregroundStyle(.primary)
+                    .contentTransition(.numericText())
                 Text("W")
-                    .font(.system(size: 18, weight: .regular, design: .rounded))
+                    .font(.system(size: 18, weight: .regular))
                     .foregroundStyle(.secondary)
             }
-            .padding(.vertical, 6)
+            .padding(.top, 10)
+
+            if let time = timeText {
+                Text(time)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.tertiary)
+            }
         }
+        .padding(.bottom, 6)
+        .frame(maxWidth: .infinity)
     }
 
-    private var statusText: String { powerMonitor.batteryInfo?.isCharging == true ? "Charging" : powerMonitor.batteryInfo?.isPluggedIn == true ? "Plugged In" : "On Battery" }
-    private var statusColor: Color { powerMonitor.batteryInfo?.isCharging == true ? .green : powerMonitor.batteryInfo?.isPluggedIn == true ? .blue : .orange }
     private var timeText: String? {
         guard let b = powerMonitor.batteryInfo else { return nil }
         if b.isCharging { return b.formattedTimeToFull == "--" ? nil : "\(b.formattedTimeToFull) to full" }
@@ -99,7 +182,7 @@ struct BatterySection: View {
     var body: some View {
         NativeSectionView(title: "Battery") {
             if let battery = powerMonitor.batteryInfo {
-                HStack(spacing: 10) {
+                HStack(alignment: .top, spacing: 10) {
                     BatteryIconView(
                         percentage: battery.currentCapacity,
                         voltage: battery.voltage,
@@ -108,17 +191,18 @@ struct BatterySection: View {
                         nominalVoltage: battery.nominalVoltage,
                         color: batteryColor(for: battery.currentCapacity)
                     )
+                    .frame(maxHeight: .infinity, alignment: .center)
 
                     VStack(alignment: .leading, spacing: 4) {
                         StatRow(label: "Cycles", value: "\(battery.cycleCount)")
-                        StatRow(label: "Temp", value: String(format: "%.0f°C", battery.temperature))
-                        StatRow(label: "Health", value: String(format: "%.0f%%", battery.batteryHealth))
+                        StatRow(label: "Temp", value: battery.temperature > 0 ? String(format: "%.0f°C", battery.temperature) : "—")
+                        StatRow(label: "Health", value: battery.batteryHealth > 0 ? String(format: "%.0f%%", battery.batteryHealth) : "—")
                     }
 
                     Spacer()
 
                     if let charger = powerMonitor.chargerInfo, charger.isConnected {
-                        VStack(alignment: .trailing, spacing: 2) {
+                        VStack(alignment: .trailing, spacing: 4) {
                             HStack(spacing: 3) {
                                 if charger.isAppleAdapter {
                                     Image(systemName: "apple.logo")
@@ -127,15 +211,19 @@ struct BatterySection: View {
                                 }
                                 if charger.watts > 0 {
                                     Text("\(charger.watts)W")
-                                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                        .font(.system(size: 13, weight: .semibold))
                                 }
                             }
 
                             if charger.watts > 0 {
                                 let (voltage, current) = usbcPDSpecs(watts: charger.watts)
-                                Text(String(format: "%.0fV @ %.1fA", voltage, current))
-                                    .font(.system(size: 9, weight: .medium, design: .monospaced))
-                                    .foregroundStyle(.green)
+                                VStack(alignment: .trailing, spacing: 1) {
+                                    Text(String(format: "%.0fV", voltage))
+                                    Text(String(format: "%.1fA", current))
+                                }
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(.green)
+                                .fixedSize()
                             }
                         }
                     }
@@ -176,7 +264,7 @@ struct BatteryIconView: View {
     var body: some View {
         ZStack(alignment: .leading) {
             RoundedRectangle(cornerRadius: 4, style: .continuous)
-                .stroke(Color.primary.opacity(isHovered ? 0.4 : 0.25), lineWidth: 1.5)
+                .stroke(Color.primary.opacity(isHovered ? 0.35 : 0.2), lineWidth: 1)
                 .frame(width: batteryWidth, height: batteryHeight)
 
             RoundedRectangle(cornerRadius: 1.5, style: .continuous)
@@ -214,7 +302,7 @@ struct BatteryIconView: View {
         case .percentage:
             HStack(alignment: .firstTextBaseline, spacing: 1) {
                 Text("\(percentage)")
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .font(.system(size: 14, weight: .semibold))
                 Text("%")
                     .font(.system(size: 10, weight: .medium))
                     .opacity(0.7)
@@ -222,7 +310,7 @@ struct BatteryIconView: View {
         case .voltage:
             HStack(alignment: .firstTextBaseline, spacing: 1) {
                 Text(String(format: "%.2f", voltage))
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .font(.system(size: 13, weight: .semibold))
                 Text("V")
                     .font(.system(size: 9, weight: .medium))
                     .opacity(0.7)
@@ -230,7 +318,7 @@ struct BatteryIconView: View {
         case .wattHours:
             VStack(spacing: 0) {
                 Text(String(format: "%.1f", currentWh))
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .font(.system(size: 12, weight: .semibold))
                 Text(String(format: "/ %.0f Wh", maxWh))
                     .font(.system(size: 8, weight: .medium))
                     .opacity(0.7)
@@ -341,7 +429,14 @@ struct PowerFlowSection: View {
                     )
                 }
             }
+            .animation(.easeInOut(duration: 0.25), value: flowLayoutKey)
         }
+    }
+
+    /// Changes whenever the number of rows on either side flips, so the
+    /// resize can animate smoothly instead of snapping the whole window.
+    private var flowLayoutKey: Int {
+        (isPluggedIn ? 1 : 0) | (isBatteryCharging ? 2 : 0) | (isBatteryDischarging ? 4 : 0)
     }
 }
 
@@ -359,16 +454,15 @@ struct NativeSectionView<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let title = title {
-                Text(title.uppercased())
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.tertiary)
+                Text(title)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
                     .padding(.leading, 2)
             }
             content
-                .padding(10)
+                .padding(8)
                 .frame(maxWidth: .infinity)
-                .background(.regularMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .glassCard(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
     }
 }
@@ -388,7 +482,7 @@ struct PowerNodeView: View {
 
             VStack(alignment: .leading, spacing: 0) {
                 Text(value)
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .font(.system(size: 12, weight: .semibold))
                     .monospacedDigit()
                     .foregroundStyle(.primary)
                 Text(label)
@@ -398,9 +492,9 @@ struct PowerNodeView: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 6)
+        .padding(.vertical, 5)
         .frame(maxWidth: .infinity)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+        .background(Color.primary.opacity(0.03))
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 }
@@ -414,7 +508,7 @@ struct HistorySection: View {
         NativeSectionView(title: "Statistics") {
             VStack(spacing: 8) {
                 PowerGraph(readings: powerMonitor.energyHistory)
-                    .frame(height: 40)
+                    .frame(height: 32)
 
                 Divider()
                     .opacity(0.3)
@@ -469,7 +563,7 @@ struct StatColumn: View {
                         .foregroundStyle(.tertiary)
                 }
                 Text(item.value)
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(item.color ?? .primary)
             }
         }
@@ -533,44 +627,43 @@ struct PowerGraph: View {
 
 struct AppFooterView: View {
     @ObservedObject var powerMonitor: PowerMonitorService
-    @State private var showSettings = false
-    @State private var showAbout = false
+    @Binding var route: PanelRoute
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             Button(action: { NSApplication.shared.terminate(nil) }) {
-                Label("Quit", systemImage: "power")
+                Image(systemName: "power")
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(width: 20, height: 20)
             }
-            .buttonStyle(FooterButtonStyle())
+            .glassControl()
 
             Spacer()
 
             Link(destination: URL(string: "https://github.com/zimengxiong/watt")!) {
                 GitHubIcon()
-                    .frame(width: 12, height: 12)
+                    .frame(width: 15, height: 15)
+                    .frame(width: 20, height: 20)
             }
-            .buttonStyle(FooterButtonStyle())
+            .glassControl()
 
-            Button(action: { showAbout.toggle() }) {
+            Button(action: { route = .about }) {
                 Image(systemName: "info.circle")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(width: 20, height: 20)
             }
-            .buttonStyle(FooterButtonStyle())
-            .popover(isPresented: $showAbout, arrowEdge: .bottom) {
-                AboutView()
-            }
+            .glassControl()
 
-            Button(action: { showSettings.toggle() }) {
+            Button(action: { route = .settings }) {
                 Image(systemName: "gearshape")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(width: 20, height: 20)
             }
-            .buttonStyle(FooterButtonStyle())
-            .popover(isPresented: $showSettings, arrowEdge: .bottom) {
-                SettingsView(powerMonitor: powerMonitor)
-            }
+            .glassControl()
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.top, 6)
+        .padding(.bottom, 10)
     }
 }
 
@@ -595,6 +688,7 @@ struct FooterButtonStyle: ButtonStyle {
 struct SettingsView: View {
     @ObservedObject var powerMonitor: PowerMonitorService
     @ObservedObject var daemon = PowerMetricsDaemon.shared
+    var onBack: () -> Void
     @State private var costInput: String = ""
     @State private var zipCodeInput: String = ""
     @State private var showResetConfirmation: Bool = false
@@ -602,37 +696,27 @@ struct SettingsView: View {
     @State private var launchAtLogin: Bool = SMAppService.mainApp.status == .enabled
 
     var body: some View {
-        ZStack {
-            VisualEffectView(material: .popover, blendingMode: .behindWindow)
+        VStack(alignment: .leading, spacing: 0) {
+            InlinePanelHeader(title: "Settings", onBack: onBack)
 
-            VStack(alignment: .leading, spacing: 0) {
-                Text("Settings")
-                .font(.system(size: 13, weight: .semibold))
-                .padding(.horizontal, 16)
-                .padding(.top, 14)
-                .padding(.bottom, 10)
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 18) {
                 SettingsSection(title: "Electricity Cost") {
                     HStack(spacing: 8) {
-                        HStack(spacing: 4) {
+                        HStack(spacing: 3) {
                             Text("$")
                                 .foregroundStyle(.secondary)
                             TextField("0.120", text: $costInput)
                                 .textFieldStyle(.plain)
-                                .frame(width: 50)
+                                .frame(width: 52)
                                 .onSubmit { applyCost() }
                         }
-                        .padding(.leading, 10)
-                        .padding(.trailing, 8)
+                        .padding(.horizontal, 10)
                         .padding(.vertical, 5)
                         .background(Color(nsColor: .textBackgroundColor))
-                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .stroke(Color.primary.opacity(0.12), lineWidth: 1)
                         )
 
                         Text("per kWh")
@@ -646,7 +730,7 @@ struct SettingsView: View {
                             .controlSize(.small)
                     }
 
-                    HStack {
+                    HStack(spacing: 4) {
                         Text("Current:")
                             .foregroundStyle(.secondary)
                         Text("$\(String(format: "%.3f", powerMonitor.electricityCostPerKwh))/kWh")
@@ -683,7 +767,7 @@ struct SettingsView: View {
                     .controlSize(.small)
                 }
 
-                SettingsSection(title: "Extras") {
+                SettingsSection(title: "Startup") {
                     Toggle(isOn: $launchAtLogin) {
                         Text("Launch at login")
                     }
@@ -700,11 +784,9 @@ struct SettingsView: View {
                             launchAtLogin = !newValue
                         }
                     }
+                }
 
-                    Divider()
-                        .opacity(0.3)
-                        .padding(.vertical, 4)
-
+                SettingsSection(title: "Data") {
                     if showResetConfirmation {
                         HStack(spacing: 8) {
                             Text("Reset all statistics?")
@@ -731,12 +813,10 @@ struct SettingsView: View {
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                     }
+                }
 
-                    if daemon.isInstalled {
-                        Divider()
-                            .opacity(0.3)
-                            .padding(.vertical, 4)
-
+                if daemon.isInstalled {
+                    SettingsSection(title: "Metrics Service") {
                         if showUninstallConfirmation {
                             HStack(spacing: 8) {
                                 Text("Remove service?")
@@ -757,30 +837,33 @@ struct SettingsView: View {
                                 .tint(.red)
                             }
                         } else {
-                            VStack(alignment: .leading, spacing: 6) {
-                                HStack {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(.green)
-                                        .font(.system(size: 10))
-                                    Text("Metrics service installed")
-                                        .foregroundStyle(.secondary)
-                                }
-                                .font(.system(size: 11))
+                            HStack(spacing: 5) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(.green)
+                                    .font(.system(size: 10))
+                                Text("Installed")
+                                    .foregroundStyle(.secondary)
 
-                                Button("Uninstall Service") {
+                                Spacer()
+
+                                Button("Uninstall") {
                                     showUninstallConfirmation = true
                                 }
                                 .buttonStyle(.bordered)
                                 .controlSize(.small)
                             }
+                            .font(.system(size: 11))
                         }
                     }
                 }
             }
-            .padding(16)
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 16)
+
+            Spacer(minLength: 0)
         }
-        }
-        .frame(width: 280)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .onAppear {
             costInput = String(format: "%.3f", powerMonitor.electricityCostPerKwh)
             zipCodeInput = powerMonitor.zipCode
@@ -800,9 +883,9 @@ struct SettingsSection<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title.uppercased())
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.tertiary)
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
 
             VStack(alignment: .leading, spacing: 10) {
                 content

@@ -7,9 +7,9 @@ struct SystemMetricsSection: View {
 
     var body: some View {
         NativeSectionView(title: metricsService.metrics.chip.name + " (cores: \(metricsService.metrics.chip.eCoreCount)E+\(metricsService.metrics.chip.pCoreCount)P+\(metricsService.metrics.chip.gpuCoreCount)GPU)") {
-            VStack(spacing: 8) {
+            VStack(spacing: 6) {
                 // E-CPU and P-CPU side by side
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
                     CPUClusterView(
                         title: "E-CPU",
                         cluster: metricsService.metrics.eCPU,
@@ -23,7 +23,7 @@ struct SystemMetricsSection: View {
                 }
 
                 // GPU and ANE side by side
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
                     GPUView(gpu: metricsService.metrics.gpu)
                     ANEView(ane: metricsService.metrics.ane)
                 }
@@ -43,7 +43,7 @@ struct CPUClusterView: View {
     let color: Color
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 3) {
             Text("\(title) Usage: \(String(format: "%.0f%%", cluster.usage))")
                 .font(.system(size: 9, weight: .medium))
                 .foregroundStyle(.secondary)
@@ -53,10 +53,10 @@ struct CPUClusterView: View {
                 coreCount: max(cluster.coreCount, 4),
                 color: color
             )
-            .frame(height: 50)
+            .frame(height: 38)
         }
-        .padding(8)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+        .padding(6)
+        .background(Color.primary.opacity(0.03))
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 }
@@ -67,7 +67,7 @@ struct GPUView: View {
     let gpu: GPUMetrics
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 3) {
             Text("GPU Usage: \(String(format: "%.0f%%", gpu.usage))")
                 .font(.system(size: 9, weight: .medium))
                 .foregroundStyle(.secondary)
@@ -77,10 +77,10 @@ struct GPUView: View {
                 coreCount: min(max(gpu.coreCount / 2, 8), 20),
                 color: .yellow
             )
-            .frame(height: 50)
+            .frame(height: 38)
         }
-        .padding(8)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+        .padding(6)
+        .background(Color.primary.opacity(0.03))
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 }
@@ -91,7 +91,7 @@ struct ANEView: View {
     let ane: ANEMetrics
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 3) {
             Text("ANE Usage: \(String(format: "%.0f%%", ane.usage))")
                 .font(.system(size: 9, weight: .medium))
                 .foregroundStyle(.secondary)
@@ -101,10 +101,10 @@ struct ANEView: View {
                 coreCount: 16,
                 color: .cyan
             )
-            .frame(height: 50)
+            .frame(height: 38)
         }
-        .padding(8)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+        .padding(6)
+        .background(Color.primary.opacity(0.03))
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 }
@@ -115,7 +115,7 @@ struct MemoryBarView: View {
     let memory: MemoryMetrics
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 3) {
             Text("RAM: \(String(format: "%.1f", memory.usedGB))/\(String(format: "%.1f", memory.totalGB))GB - swap: \(String(format: "%.1f", memory.swapUsedGB))/\(String(format: "%.1f", memory.swapTotalGB))GB")
                 .font(.system(size: 9, weight: .medium))
                 .foregroundStyle(.secondary)
@@ -124,10 +124,10 @@ struct MemoryBarView: View {
                 value: memory.usagePercent / 100,
                 color: memoryColor
             )
-            .frame(height: 20)
+            .frame(height: 16)
         }
-        .padding(8)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+        .padding(6)
+        .background(Color.primary.opacity(0.03))
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 

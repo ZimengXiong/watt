@@ -1,9 +1,14 @@
 import SwiftUI
 
 struct AboutView: View {
+    var onBack: () -> Void
+
     var body: some View {
-        ZStack {
-            VisualEffectView(material: .popover, blendingMode: .behindWindow)
+        VStack(spacing: 0) {
+            InlinePanelHeader(title: "About", onBack: onBack)
+
+            Divider()
+                .opacity(0.2)
 
             VStack(spacing: 16) {
                 VStack(spacing: 6) {
@@ -36,8 +41,8 @@ struct AboutView: View {
                         Text("Version \(getAppVersion())")
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(.secondary)
-                        Text(getGitHash().uppercased())
-                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        Text(getGitHash())
+                            .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(.tertiary)
                     }
 
@@ -63,8 +68,11 @@ struct AboutView: View {
             }
             .padding(.vertical, 20)
             .padding(.horizontal, 24)
+            .frame(maxWidth: .infinity)
+
+            Spacer(minLength: 0)
         }
-        .frame(width: 240)
+        .frame(maxWidth: .infinity, alignment: .top)
     }
 
     private func getAppVersion() -> String {
@@ -89,5 +97,5 @@ struct GitHubIcon: View {
 }
 
 #Preview {
-    AboutView()
+    AboutView(onBack: {})
 }
