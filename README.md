@@ -9,10 +9,11 @@ Monitor power consumption, cost, and core usage.
 ### Homebrew
 
 ```bash
-brew install --cask --no-quarantine zimengxiong/watt/watt
+brew install --cask zimengxiong/watt/watt
+xattr -cr /Applications/Watt.app
 ```
 
-> **Note:** The `--no-quarantine` flag is required because the app is not notarized with Apple. Without this flag, macOS Gatekeeper will block the app from running.
+> **Note:** The app isn't notarized with Apple, so macOS Gatekeeper will block it on first launch. Homebrew no longer allows the `--no-quarantine` flag, so run `xattr -cr /Applications/Watt.app` after installing to clear the quarantine attribute.
 
 ### Build from Source
 

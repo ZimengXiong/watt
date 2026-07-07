@@ -9,6 +9,11 @@ RELEASE_APP_PATH = $(DERIVED_DATA)/Build/Products/Release/$(PROJECT_NAME).app
 EXECUTABLE = $(APP_PATH)/Contents/MacOS/$(PROJECT_NAME)
 RELEASE_EXECUTABLE = $(RELEASE_APP_PATH)/Contents/MacOS/$(PROJECT_NAME)
 
+# Code signing (Apple Development cert)
+TEAM_ID = W9C2P3N7Q2
+SIGN_IDENTITY = Apple Development: zxzimeng@gmail.com (4F7GA4MB42)
+SIGN_FLAGS = CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=$(TEAM_ID) "CODE_SIGN_IDENTITY=$(SIGN_IDENTITY)"
+
 all: build
 
 setup:
@@ -22,6 +27,7 @@ build: setup
 		-configuration Debug \
 		-derivedDataPath $(DERIVED_DATA) \
 		-quiet \
+		$(SIGN_FLAGS) \
 		build
 	@echo "Build completed: $(APP_PATH)"
 
@@ -38,6 +44,7 @@ release: setup
 		-configuration Release \
 		-derivedDataPath $(DERIVED_DATA) \
 		-quiet \
+		$(SIGN_FLAGS) \
 		build
 	@echo "Release build completed: $(RELEASE_APP_PATH)"
 	@echo "Packaging for distribution..."
