@@ -2,9 +2,8 @@
 
 Monitor power consumption, cost, and core usage.
 
-<p align="left">
-  <img src="Screenshots/main.png" alt="Watt" height="700">
-</p>
+<img width="1038" height="730" alt="image" src="https://github.com/user-attachments/assets/5081bda4-9e27-4224-aaeb-5c9df7660391" />
+
 
 
 ## Installation
