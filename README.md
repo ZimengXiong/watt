@@ -2,9 +2,7 @@
 
 Monitor power consumption, cost, and core usage.
 
-<img width="1038" height="730" alt="image" src="https://github.com/user-attachments/assets/5081bda4-9e27-4224-aaeb-5c9df7660391" />
-
-
+<img width="731" height="731" alt="image" src="https://github.com/user-attachments/assets/5fac708f-2a22-4aad-a0ce-e3e183017b52" />
 
 ## Installation
 
