@@ -1,10 +1,11 @@
 .PHONY: all setup build build-release run open run-release clean install uninstall xcode \
 	build-verbose release guard-clean guard-publish help
 
-# Recipes below pipe xcodebuild through filters and check exit codes. Without
-# pipefail, `xcodebuild ... | tail` reports the status of tail, so a build or test
-# failure can look like success. bash is named explicitly because /bin/sh on
-# some hosts is dash, which has no pipefail.
+# Recipes below pipe xcodebuild through filters and check exit codes. pipefail is
+# asked for here because GNU make >= 3.82 (and Homebrew make) honour .SHELLFLAGS;
+# Apple's /usr/bin/make is a 3.81 that ignores it outright, measured by watching the
+# shell get invoked as `-c <recipe>`. Every recipe in this file that could therefore
+# swallow a status captures it explicitly instead of relying on this line.
 SHELL := /bin/bash
 .SHELLFLAGS = -o pipefail -c
 
