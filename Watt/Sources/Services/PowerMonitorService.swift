@@ -100,6 +100,9 @@ struct DailyEnergyRecord: Codable, Identifiable {
     var id: String { date }
     let date: String
     var energyUsed: Double
+    /// Wh of `energyUsed` billed at the off-peak rate. Nil in records written before
+    /// time-of-use pricing existed, and always nil under a flat tariff.
+    var offPeakEnergyUsed: Double?
 }
 
 class PowerMonitorService: ObservableObject {
@@ -120,12 +123,33 @@ class PowerMonitorService: ObservableObject {
     @Published var dailyHistory: [DailyEnergyRecord] = []
     @Published var batteryRatePerMinute: Double = 0
 
-    @Published var electricityCostPerKwh: Double = 0.12
+    /// Pricing model: flat, or peak/off-peak with an off-peak schedule.
+    /// `electricityCostPerKwh` is the peak (or only) rate, so a stored flat rate from an
+    /// earlier version keeps working as the peak rate when time-of-use is switched on.
+    @Published var tariff: Tariff = Tariff()
+    @Published var currency: Currency = .usd
     @Published var autoFindElectricityCost: Bool = false
     @Published var zipCode: String = ""
 
+    var electricityCostPerKwh: Double {
+        get { tariff.peakRate }
+        set { tariff.peakRate = newValue }
+    }
+
+    /// Wh charged at the off-peak rate. Stays 0 under a flat tariff, where every Wh is
+    /// priced by `electricityCostPerKwh` anyway.
+    @Published private(set) var todayOffPeakEnergyUsed: Double = 0
+    @Published private(set) var lifetimeOffPeakEnergyUsed: Double = 0
+
     var lifetimeCost: Double {
-        return (lifetimeEnergyUsed / 1000.0) * electricityCostPerKwh
+        cost(of: lifetimeEnergyUsed, offPeak: lifetimeOffPeakEnergyUsed)
+    }
+
+    /// Money for `wh` at the tariff in force. Off-peak energy is priced at the off-peak rate
+    /// only in time-of-use mode; a flat tariff has one rate for the whole day.
+    private func cost(of wh: Double, offPeak offPeakWh: Double) -> Double {
+        let offPeak = tariff.isTimeOfUse ? min(offPeakWh, wh) : 0
+        return ((wh - offPeak) / 1000.0) * tariff.peakRate + (offPeak / 1000.0) * tariff.offPeakRate
     }
 
     private var timer: DispatchSourceTimer?
@@ -146,6 +170,12 @@ class PowerMonitorService: ObservableObject {
         static let electricityCost = "com.watt.electricityCost"
         static let autoFindCost = "com.watt.autoFindCost"
         static let zipCode = "com.watt.zipCode"
+        static let tariffMode = "com.watt.tariffMode"
+        static let offPeakRate = "com.watt.offPeakRate"
+        static let offPeakWindows = "com.watt.offPeakWindows"
+        static let currency = "com.watt.currency"
+        static let lifetimeOffPeakEnergy = "com.watt.lifetimeOffPeakEnergy"
+        static let todayOffPeakEnergy = "com.watt.todayOffPeakEnergy"
     }
 
     init() {
@@ -195,20 +225,33 @@ class PowerMonitorService: ObservableObject {
         let defaults = UserDefaults.standard
         lifetimeEnergyUsed = defaults.double(forKey: Keys.lifetimeEnergy)
         lifetimeSessionCount = defaults.integer(forKey: Keys.lifetimeSessions)
+        lifetimeOffPeakEnergyUsed = defaults.double(forKey: Keys.lifetimeOffPeakEnergy)
         electricityCostPerKwh = max(0.01, defaults.double(forKey: Keys.electricityCost))
         if electricityCostPerKwh == 0.01 { electricityCostPerKwh = 0.12 }
         autoFindElectricityCost = defaults.bool(forKey: Keys.autoFindCost)
         zipCode = defaults.string(forKey: Keys.zipCode) ?? ""
         dailyHistory = (try? JSONDecoder().decode([DailyEnergyRecord].self, from: defaults.data(forKey: Keys.dailyHistory) ?? Data())) ?? []
 
+        tariff.mode = Tariff.Mode(rawValue: defaults.string(forKey: Keys.tariffMode) ?? "") ?? .flat
+        let storedOffPeak = defaults.double(forKey: Keys.offPeakRate)
+        tariff.offPeakRate = storedOffPeak > 0 ? storedOffPeak : tariff.offPeakRate
+        if let text = defaults.string(forKey: Keys.offPeakWindows), let windows = Tariff.parseWindows(text) {
+            tariff.offPeakWindows = windows
+        }
+        currency = Currency(rawValue: defaults.string(forKey: Keys.currency) ?? "") ?? .usd
+
         currentDateString = todayDateString()
         let savedDate = defaults.string(forKey: Keys.todayDate) ?? ""
 
         if savedDate == currentDateString {
             todayEnergyUsed = defaults.double(forKey: Keys.todayEnergy)
+            todayOffPeakEnergyUsed = defaults.double(forKey: Keys.todayOffPeakEnergy)
         } else if !savedDate.isEmpty, defaults.double(forKey: Keys.todayEnergy) > 0 {
-            archiveDay(date: savedDate, energy: defaults.double(forKey: Keys.todayEnergy))
+            archiveDay(date: savedDate,
+                       energy: defaults.double(forKey: Keys.todayEnergy),
+                       offPeak: defaults.double(forKey: Keys.todayOffPeakEnergy))
             todayEnergyUsed = 0
+            todayOffPeakEnergyUsed = 0
             defaults.set(currentDateString, forKey: Keys.todayDate)
         }
 
@@ -219,20 +262,45 @@ class PowerMonitorService: ObservableObject {
         let defaults = UserDefaults.standard
         defaults.set(lifetimeEnergyUsed, forKey: Keys.lifetimeEnergy)
         defaults.set(lifetimeSessionCount, forKey: Keys.lifetimeSessions)
+        defaults.set(lifetimeOffPeakEnergyUsed, forKey: Keys.lifetimeOffPeakEnergy)
         defaults.set(todayEnergyUsed, forKey: Keys.todayEnergy)
+        defaults.set(todayOffPeakEnergyUsed, forKey: Keys.todayOffPeakEnergy)
         defaults.set(currentDateString, forKey: Keys.todayDate)
         defaults.set(electricityCostPerKwh, forKey: Keys.electricityCost)
         defaults.set(autoFindElectricityCost, forKey: Keys.autoFindCost)
         defaults.set(zipCode, forKey: Keys.zipCode)
+        defaults.set(tariff.mode.rawValue, forKey: Keys.tariffMode)
+        defaults.set(tariff.offPeakRate, forKey: Keys.offPeakRate)
+        defaults.set(Tariff.windowsText(tariff.offPeakWindows), forKey: Keys.offPeakWindows)
+        defaults.set(currency.rawValue, forKey: Keys.currency)
         if let data = try? JSONEncoder().encode(dailyHistory) {
             defaults.set(data, forKey: Keys.dailyHistory)
         }
     }
 
+    // MARK: Pricing controls
+
     func setElectricityCost(_ cost: Double) {
         DispatchQueue.main.async {
-            self.electricityCostPerKwh = cost
+            self.tariff.peakRate = cost
             self.autoFindElectricityCost = false
+            self.saveLifetimeStats()
+        }
+    }
+
+    /// Applies an edited tariff. Off-peak energy already metered keeps being priced at the
+    /// stored off-peak total, so switching modes never rewrites history silently.
+    func setTariff(_ tariff: Tariff) {
+        DispatchQueue.main.async {
+            self.tariff = tariff
+            self.autoFindElectricityCost = false
+            self.saveLifetimeStats()
+        }
+    }
+
+    func setCurrency(_ currency: Currency) {
+        DispatchQueue.main.async {
+            self.currency = currency
             self.saveLifetimeStats()
         }
     }
@@ -249,7 +317,7 @@ class PowerMonitorService: ObservableObject {
         DispatchQueue.main.async {
             self.zipCode = zip
             if let state = self.getStateFromZipCode(zip) {
-                self.electricityCostPerKwh = self.getStateElectricityRate(state: state)
+                self.tariff.peakRate = self.getStateElectricityRate(state: state)
                 self.autoFindElectricityCost = false
             }
             self.saveLifetimeStats()
@@ -259,6 +327,7 @@ class PowerMonitorService: ObservableObject {
     func resetAllStatistics() {
         DispatchQueue.main.async {
             (self.lifetimeEnergyUsed, self.lifetimeSessionCount, self.todayEnergyUsed) = (0, 0, 0)
+            (self.lifetimeOffPeakEnergyUsed, self.todayOffPeakEnergyUsed) = (0, 0)
             (self.dailyHistory, self.energyHistory) = ([], [])
             self.currentDateString = self.todayDateString()
             self.saveLifetimeStats()
@@ -304,7 +373,7 @@ class PowerMonitorService: ObservableObject {
                let region = json["region_code"] as? String {
                 let rate = self?.getStateElectricityRate(state: region) ?? 0.12
                 DispatchQueue.main.async {
-                    self?.electricityCostPerKwh = rate
+                    self?.tariff.peakRate = rate
                     self?.saveLifetimeStats()
                 }
             }
@@ -328,11 +397,12 @@ class PowerMonitorService: ObservableObject {
         }
     }
 
-    private func archiveDay(date: String, energy: Double) {
+    private func archiveDay(date: String, energy: Double, offPeak: Double = 0) {
         if let index = dailyHistory.firstIndex(where: { $0.date == date }) {
             dailyHistory[index].energyUsed = energy
+            dailyHistory[index].offPeakEnergyUsed = offPeak
         } else {
-            dailyHistory.append(DailyEnergyRecord(date: date, energyUsed: energy))
+            dailyHistory.append(DailyEnergyRecord(date: date, energyUsed: energy, offPeakEnergyUsed: offPeak))
             if dailyHistory.count > 90 { dailyHistory.removeFirst(dailyHistory.count - 90) }
         }
     }
@@ -344,8 +414,9 @@ class PowerMonitorService: ObservableObject {
     private func checkDayChange() {
         let now = todayDateString()
         guard now != currentDateString else { return }
-        if todayEnergyUsed > 0 { archiveDay(date: currentDateString, energy: todayEnergyUsed) }
+        if todayEnergyUsed > 0 { archiveDay(date: currentDateString, energy: todayEnergyUsed, offPeak: todayOffPeakEnergyUsed) }
         todayEnergyUsed = 0
+        todayOffPeakEnergyUsed = 0
         currentDateString = now
         UserDefaults.standard.set(now, forKey: Keys.todayDate)
         saveLifetimeStats()
@@ -438,6 +509,12 @@ class PowerMonitorService: ObservableObject {
                 let energyDelta = avgPower * timeDelta
                 todayEnergyUsed += energyDelta
                 lifetimeEnergyUsed += energyDelta
+                // Attribute the interval to the band it was consumed in, not the one it is
+                // being read in — the sample straddles `lastReadingTime` → now.
+                if tariff.isOffPeak(at: lastReadingTime) {
+                    todayOffPeakEnergyUsed += energyDelta
+                    lifetimeOffPeakEnergyUsed += energyDelta
+                }
             }
         }
 
@@ -738,12 +815,18 @@ class PowerMonitorService: ObservableObject {
         return Double(value)
     }
 
+    /// Cost of the current draw at the rate in force right now.
     var costPerHour: Double {
         guard currentPower > 0 else { return 0 }
-        return (currentPower / 1000.0) * electricityCostPerKwh
+        return (currentPower / 1000.0) * tariff.rate(at: Date())
     }
 
     var todayCost: Double {
-        return (todayEnergyUsed / 1000.0) * electricityCostPerKwh
+        cost(of: todayEnergyUsed, offPeak: todayOffPeakEnergyUsed)
+    }
+
+    /// Share of today's metered energy that fell in an off-peak window, 0...1.
+    var todayOffPeakShare: Double {
+        todayEnergyUsed > 0 ? min(1, todayOffPeakEnergyUsed / todayEnergyUsed) : 0
     }
 }

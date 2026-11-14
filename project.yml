@@ -70,3 +70,41 @@ targets:
       path: Watt/Resources/Watt.entitlements
       properties:
         com.apple.security.app-sandbox: false
+
+  # Hosted unit tests: they run inside the app process so `@testable import Watt` reaches
+  # the real types. Ad-hoc signed, like the app, so `make test` needs no developer account.
+  WattTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Watt/Tests
+        type: group
+    dependencies:
+      - target: Watt
+    settings:
+      base:
+        PRODUCT_NAME: WattTests
+        PRODUCT_BUNDLE_IDENTIFIER: com.watt.WattTests
+        SWIFT_VERSION: "5.9"
+        GENERATE_INFOPLIST_FILE: YES
+        BUNDLE_LOADER: $(TEST_HOST)
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/Watt.app/Contents/MacOS/Watt
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+        DEVELOPMENT_TEAM: ""
+
+schemes:
+  Watt:
+    build:
+      targets:
+        Watt: all
+        WattTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - WattTests
+    archive:
+      config: Release
