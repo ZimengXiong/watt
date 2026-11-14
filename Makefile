@@ -1,4 +1,4 @@
-.PHONY: all setup build run clean install release help
+.PHONY: all setup build test run clean install release help
 
 PROJECT_NAME = Watt
 SCHEME = Watt
@@ -73,6 +73,42 @@ release: setup
 		git push -f && \
 		echo "Pushed homebrew update to remote"
 
+# xcodebuild buries the verdict in a wall of log, so the tail is what a human reads.
+# The status has to survive that deliberately: Apple's /usr/bin/make is a GNU Make
+# 3.81 that ignores .SHELLFLAGS and invokes the shell as `-c <recipe>` (measured by
+# pointing SHELL at a logging wrapper), so `xcodebuild test | tail` reports the
+# status of tail and exits 0 on a red suite. Captured by hand instead.
+#
+# The second check is not decoration either: `xcodebuild -only-testing:<nothing>`
+# prints "Executed 0 tests", then "** TEST SUCCEEDED **", and exits 0. A renamed
+# test target would therefore delete coverage silently, on any make, in any CI.
+# TEST_FILTER is overridable so that guard is itself exercisable.
+TEST_FILTER ?= $(PROJECT_NAME)Tests
+
+test: setup
+	@echo "Running tests..."
+	@mkdir -p $(BUILD_DIR)
+	@xcodebuild -project $(PROJECT_NAME).xcodeproj \
+		-scheme $(SCHEME) \
+		-configuration Debug \
+		-derivedDataPath $(DERIVED_DATA) \
+		-destination "platform=macOS,arch=arm64" \
+		-only-testing:$(TEST_FILTER) \
+		test > $(BUILD_DIR)/test.log 2>&1; \
+	status=$$?; \
+	tail -n 30 $(BUILD_DIR)/test.log; \
+	if [ $$status -ne 0 ]; then \
+		echo "test: xcodebuild exited $$status - full log at $(BUILD_DIR)/test.log"; \
+		exit $$status; \
+	fi; \
+	ran=$$(grep -Eo 'Executed [0-9]+ tests' $(BUILD_DIR)/test.log | head -1 | awk '{print $$2}'); \
+	if [ "$${ran:-0}" -eq 0 ]; then \
+		echo "test: 0 tests executed. -only-testing:$(TEST_FILTER) matched nothing,"; \
+		echo "       and xcodebuild reports that as TEST SUCCEEDED with exit 0."; \
+		exit 1; \
+	fi; \
+	echo "test: $$ran test(s) executed, all green"
+
 run: build
 	@$(EXECUTABLE)
 
@@ -119,6 +155,7 @@ help:
 	@echo "Targets:"
 	@echo "  setup         Generate Xcode project with XcodeGen"
 	@echo "  build         Build the app (debug configuration)"
+	@echo "  test          Run the unit tests"
 	@echo "  release       Build release, package zip, update homebrew"
 	@echo "  run           Build and run the executable directly"
 	@echo "  open          Build and open the app bundle"
