@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build from a clean clone (ad-hoc signed)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      # Watt.xcodeproj is generated and gitignored, so xcodegen is part of the build,
+      # not a prerequisite a contributor is expected to have run.
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Build (Debug)
+        run: make build SIGN_IDENTITY=
+
+      - name: Build (Release)
+        run: make build-release SIGN_IDENTITY=
+
+      - name: Verify the bundle
+        run: |
+          app=build/DerivedData/Build/Products/Release/Watt.app
+          test -d "$app"
+          codesign --verify --strict --verbose=2 "$app"
+          codesign -dvv "$app" 2>&1 | grep -q 'Signature=adhoc'
+          version=$(sed -n 's/^ *MARKETING_VERSION: *//p' project.yml | head -1)
+          built=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")
+          test "$version" = "$built" || { echo "version mismatch: $version vs $built"; exit 1; }
+
+      # Regression test for the release guards: on a clean checkout with no REMOTE
+      # configured, `make release` must stop before it pushes, tags or publishes.
+      - name: Release target must refuse to publish unconfigured
+        run: |
+          if make release >make-release.log 2>&1; then
+            echo "make release did not refuse - it would have published"
+            tail -n 40 make-release.log
+            exit 1
+          fi
+          grep -q 'Refusing to publish' make-release.log
+          git tag -l 'v*' | grep -q . && { echo "a tag was created by a refused release"; exit 1; } || true
